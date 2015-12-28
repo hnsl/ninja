@@ -7,12 +7,16 @@ local role_server = 0 -- Server vm, "server"
 local role_miner = 1  -- Miner computer, "miner_$MINEID_$TURTLEID"
 
 -- Debugging.
-function debug(x)
+function fmt(x)
     if is_server == nil then
-        print(textutils.serializeJSON(x))
+        return textutils.serializeJSON(x)
     else
-        print(JSON:encode_pretty(x))
+        return JSON:encode(x)
     end
+end
+
+function debug(x)
+    print(type(x) == "string" and x or fmt(x))
 end
 
 -- String splitting.
@@ -38,9 +42,8 @@ end
 -- Role parser.
 function parse_role()
     local label = (is_server ~= nil and 'server' or os.getComputerLabel())
+    debug("kernel: label [" .. label .. "]")
     local lparts = split(label, "_")
-    debug(label)
-    debug(lparts)
     role = {}
     if lparts[1] == "server" then
         return {
@@ -61,8 +64,9 @@ end
 
 -- F
 
+debug("kernel: booting, parsing role")
 role = parse_role()
-debug(role)
+debug("kernel: " .. fmt(role))
 
 --EOF
 `

@@ -1,10 +1,7 @@
 package main
 
 import(
-    //"fmt"
     "log"
-    //"buffer"
-    //"os"
     "net/http"
     "github.com/yuin/gopher-lua"
 )
@@ -19,22 +16,6 @@ func check(err error) {
 
 func main() {
     log.SetPrefix("[ninja]")
-    /*
-    // Read lua script script.
-    gopath := os.Getenv("GOPATH")
-    pkg_path := "github.com/hnsl/ninja"
-    f, err := os.Open(gopath + "/src/" + pkg_path + "/startup.lua", "r")
-    check(err)
-    var buf buffer.Buffer
-    _, err = buf.ReadFrom(f)
-    check(err)
-    f.Close()
-    startup_lua = buf.String()
-    // Parse lua script.
-    v_re, err := regexp.Compile("(^|\n)local version = (\\d+)\n")
-    check(err)
-    v_match := v_re.FindStringSubmatch(startup_lua)*/
-
     // Run lua script and get version.
     log.Printf("running kernel\n")
     kern := lua.NewState()
@@ -61,8 +42,7 @@ func goHttpServer() {
 	http.HandleFunc("/", indexPage)
 	http.HandleFunc(key + "/script", getScript)
 	http.HandleFunc(key + "/version", getVersion)
-	http.HandleFunc(key + "/job/new", postJobNew)
-	http.HandleFunc(key + "/job/complete", postJobComplete)
+	http.HandleFunc(key + "/report", postReport)
 	log.Fatal(http.ListenAndServe(":4456", nil))
 }
 
@@ -78,10 +58,6 @@ func getVersion(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func postJobNew(w http.ResponseWriter, r *http.Request) {
-
-}
-
-func postJobComplete(w http.ResponseWriter, r *http.Request) {
+func postReport(w http.ResponseWriter, r *http.Request) {
 
 }

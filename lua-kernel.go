@@ -6,15 +6,15 @@ version = 1
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
 
-local role_server = 0 -- Server vm, "server"
-local role_miner = 1  -- Miner computer, "miner_$MINEID_$TURTLEID"
+local refuel_item_name = "minecraft:coal"
+local refuel_item_fpi = 80
 
 -- Debugging.
 function fmt(x)
-    if is_server == nil then
-        return textutils.serializeJSON(x)
-    else
+    if is_server then
         return JSON:encode(x)
+    else
+    return textutils.serializeJSON(x)
     end
 end
 
@@ -68,52 +68,24 @@ function fs_state_get(name, default)
     return textutils.unserialize(data)
 end
 
--- Identity parser.
-function parse_identity()
-    local label = (is_server ~= nil and 'server' or os.getComputerLabel())
-    debug("kernel: label [" .. label .. "]")
-    local lparts = split(label, "_")
-    if lparts[1] == "server" then
-        return {
-            role = role_server,
-            parent = nil,
-        }
-    elseif lparts[1] == "miner" then
-        return {
-            role = role_miner,
-            mine_id = lparts[2],
-            turtle_id = lparts[3],
-            parent = ("mine." .. lparts[2]),
-        }
-    else
-        error("invalid role: " .. label)
-    end
-end
-
--- Parse role.
-
-debug("kernel: booting, parsing role")
-identity = parse_identity()
-debug("kernel: " .. fmt(role))
-
--- Robot specific functions.
+-- Turtle robot logic.
 
 function orcomp()
     local comp = 0
     for i = 0, 3, 1 do
-        local ok, bdata
+        local success, bdata
         if (i % 2) == 0 then
             if not turtle.detectUp() then
                 return nil, "missing up block"
             end
-            ok, bdata = turtle.inspectUp()
+            success, bdata = turtle.inspectUp()
         else
             if not turtle.detectDown() then
                 return nil, "missing down block"
             end
-            ok, bdata = turtle.inspectDown()
+            success, bdata = turtle.inspectDown()
         end
-        if not ok then
+        if not success then
             return nil, ("inspect failed: " .. fmt(bdata))
         end
         local v4b = bdata.metadata
@@ -128,7 +100,6 @@ function orcomp()
 end
 
 function orientate()
-    debug("main orientation sequence start")
     local coord = {}
     for i = 1, 3, 1 do
         debug("orienting component [" .. i .. "]")
@@ -139,30 +110,138 @@ function orientate()
         debug("component [" .. i .. "]: [" .. comp .. "]")
         coord[i] = comp
     end
-    debug("main orientation sequence complete: " .. fmt(coord))
     return coord, nil
 end
 
-function main_miner()
-    debug("miner: loading turtle state")
-    -- State.
+function report()
+    -- Try reporting until reporting is successful.
+    while true do
+        if try_report() then
+            break
+        end
+        sleep(2)
+    end
+end
+
+function tryRefuel(required)
+    local first_slot = turtle.getSelectedSlot()
+    local cur_slot = first_slot
+    while true do
+        -- Check if found fuel item in this slot.
+        local detail = turtle.getItemDetail(cur_slot)
+        if detail ~= nil and detail.name == refuel_item_name then
+            -- Fuel found, select slot.
+            if cur_slot ~= first_slot then
+                local success = turtle.select(cur_slot)
+                if not success then
+                    return "selecting slot " .. fmt(cur_slot) .. " failed"
+                end
+            end
+            -- Refuel the amount we want.
+            local max = math.ceil(required / refuel_item_fpi)
+            debug("refueling " .. fmt(max) .. "@" .. fmt(cur_slot))
+            local success = turtle.refuel(max)
+            if not success then
+                return "refuel() failed"
+            end
+            -- Refueling ok.
+            return nil
+        end
+        cur_slot = (cur_slot + 1) % 16
+        if cur_slot == first_slot then
+            return "no fuel found in inventory"
+        end
+    end
+end
+
+(function()
+    if is_server then
+        debug("kernel: server run complete")
+        return
+    end
+
+    -- Initialize state.
+    debug("initializing turtle state")
     local new_kernel = nil
+    local cur_action = nil
     local pos = fs_state_get("pos", nil)
     local work_q = fs_state_get("work_q", {})
+    local fatal_err = nil
+    local refuel_err = false
+
+    local refuel_min = 100
+    local refuel_max = 32 * 80
+
+    local fatalError = (function(err)
+        local full_err = "fatal error: " .. fmt(err)
+        debug(full_err)
+        fatal_err = full_err
+    end)
+
+    -- Fuel management.
+    local actionFuelMng = (function()
+        if refuel_err then
+            return false
+        end
+        local refuel_lvl = turtle.getFuelLevel()
+        if refuel_lvl > refuel_min then
+            return false
+        end
+        debug("refueling required (" .. fmt(refuel_lvl) .. "/" .. fmt(refuel_min) .. ")")
+        while true do
+            local required = refuel_max - refuel_lvl
+            err = tryRefuel(required)
+            if err then
+                debug("refueling failed: " .. fmt(err))
+                refuel_err = true
+                break
+            end
+            refuel_lvl = turtle.getFuelLevel()
+            if refuel_lvl >= refuel_max then
+                break
+            end
+        end
+        debug("refueling complete")
+        return false
+    end)
+
+    local actionMngOrient = (function()
+        if pos ~= nil then
+            return false
+        end
+        debug("orientation required")
+        local coord, err = orientate()
+        if err ~= nil then
+            fatal_err("orientation failed, error: " .. fmt(err))
+            return true
+        end
+        pos = coord
+        debug("orientation complete: " .. fmt(pos))
+        return false
+    end)
+
+    local actionJobExec = (function()
+        debug("todo: exec job")
+        return true
+    end)
+
     -- Reporting.
-    local try_report = (function()
-        debug("miner: sending report")
+    function try_report()
+        debug("reporting: sending")
         local data = textutils.serializeJSON({
             version = version,
-            identity = identity,
+            label = os.getComputerLabel(),
+            cur_action = cur_action,
             pos = pos,
             work_q = work_q,
+            fatal_err = fatal_err,
+            refuel_err = refuel_err,
             fuel_lvl = turtle.getFuelLevel(),
         })
         local h = http.post(base_url + "/report", data)
         local rcode = ret.getResponseCode()
         if rcode ~= 200 then
-            debug("miner: report failed, bad status code [" .. tostring(rcode) .. "]")
+            debug("reporting: failed, bad status code [" .. tostring(rcode) .. "]")
             h.close()
             return false
         end
@@ -171,50 +250,45 @@ function main_miner()
         -- Unserialize response table.
         local rsp = textutils.unserialize(raw_rsp)
         if type(rsp) == "table" then
-            debug("miner: report failed, non-table response")
+            debug("reporting: failed, non-table response")
             return false
         end
-
-
-
-
-        debug("miner: report submitted ok")
+        debug("reporting: submitted ok")
         return true
-    end)
-    local report = (function()
-        -- Try reporting until reporting is successful.
-        while true do
-            if try_report() then
-                break
+    end
+    local brainTick = (function()
+        -- Actions in order of priority
+        actionSequence = {
+            -- Priority 1: Ensure we have sufficient fuel to operate.
+            {fn = actionFuelMng, name = "fuel"},
+            -- Priority 2: Ensure we have completed orientation.
+            {fn = actionMngOrient, name = "orientation"},
+            -- Priority 3: Execute jobs.
+            {fn = actionJobExec, name = "job"},
+        }
+        for i,action in pairs(actionSequence) do
+            if fatal_error then
+                debug("fatal error in brain: enabling permanent apathy")
+                return
             end
-            sleep(2)
+            cur_action = action.name
+            if action.fn() then
+                return
+            end
         end
     end)
-	parallel.waitForAny((function()
+    parallel.waitForAny((function()
         -- Report every 10 seconds.
         while true do
             report()
             sleep(10)
         end
     end), (function()
+        -- Brain tick with a one second rate limit in case of hysterical panic.
         while true do
-            -- Priority 1: Ensure we have sufficient fuel to operate.
-
-            -- Priority 2: Ensure we have completed orientation.
-
-            -- Priority 3:
-
+            brainTick()
+            sleep(1)
         end
     end))
-
-end
-
--- Run identity role main.
-
-if identity.id == role_server then
-    debug("kernel: is server, done")
-elseif identity.id == role_miner then
-    main_miner()
-end
-
+end)()
 `

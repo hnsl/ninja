@@ -1,12 +1,13 @@
 package main
 
 import(
+    "fmt"
     "log"
     "net/http"
     "github.com/yuin/gopher-lua"
 )
 
-var startup_lua string
+var kern_version int
 
 func check(err error) {
     if err != nil {
@@ -26,11 +27,11 @@ func main() {
     kern.SetGlobal("JSON", kern.Get(-1))
     err = kern.DoString(lua_src_kernel)
     check(err)
-    vers := lua.LVAsNumber(kern.GetGlobal("version"))
-    if vers < 1 {
+    kern_version = int(lua.LVAsNumber(kern.GetGlobal("version")))
+    if kern_version < 1 {
         panic("failed to get global 'version' from kernel")
     }
-    log.Printf("kernel version %d ready\n", vers)
+    log.Printf("kernel version %v ready\n", kern_version)
     log.Printf("starting http server\n")
     // Start HTTP server.
     goHttpServer()
@@ -40,7 +41,7 @@ func goHttpServer() {
 	// Start HTTP server.
     key := "/72ceda8b"
 	http.HandleFunc("/", indexPage)
-	http.HandleFunc(key + "/script", getScript)
+	http.HandleFunc(key + "/kernel", getKernel)
 	http.HandleFunc(key + "/version", getVersion)
 	http.HandleFunc(key + "/report", postReport)
 	log.Fatal(http.ListenAndServe(":4456", nil))
@@ -50,12 +51,14 @@ func indexPage(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func getScript(w http.ResponseWriter, r *http.Request) {
-
+func getKernel(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(lua_src_kernel))
 }
 
 func getVersion(w http.ResponseWriter, r *http.Request) {
-
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(fmt.Sprintf("%d", kern_version)))
 }
 
 func postReport(w http.ResponseWriter, r *http.Request) {

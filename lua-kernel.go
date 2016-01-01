@@ -1,10 +1,10 @@
-package main
-
-var lua_src_kernel = `
-version = 1
+package main; var lua_src_kernel = `
+version = 5
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
+
+local orient_block_name = "ExtraUtilities:color_stonebrick"
 
 local refuel_item_name = "minecraft:coal"
 local refuel_item_fpi = 80
@@ -53,12 +53,12 @@ function fs_state_put(name, data)
     h.write(textutils.serialize(data))
     h.close()
     fs.delete(path)
-    fs.move(tmp_path)
+    fs.move(tmp_path, path)
 end
 
 function fs_state_get(name, default)
     local path = state_root .. "/" .. name
-    if not path.exists(path) then
+    if not fs.exists(path) then
         fs_state_put(name, default)
         return default
     end
@@ -87,6 +87,9 @@ function orcomp()
         end
         if not success then
             return nil, ("inspect failed: " .. fmt(bdata))
+        end
+        if bdata.name ~= orient_block_name then
+            return nil, ("invalid block: " .. fmt(bdata.name))
         end
         local v4b = bdata.metadata
         comp = comp + v4b * (2 ^ (4 * i))
@@ -147,11 +150,49 @@ function tryRefuel(required)
             -- Refueling ok.
             return nil
         end
-        cur_slot = (cur_slot + 1) % 16
+        cur_slot = (cur_slot % 16) + 1
         if cur_slot == first_slot then
             return "no fuel found in inventory"
         end
     end
+end
+
+function upgradeKernel()
+    debug("checking for kernel upgrade")
+    local h = http.get(base_url .. "/version", data)
+    local rcode = h.getResponseCode()
+    if rcode ~= 200 then
+        debug("upgrade: failed+skipped, bad status code [" .. fmt(rcode) .. "]")
+        h.close()
+        return false
+    end
+    local new_version = tonumber(h.readAll())
+    h.close()
+    debug("upgrade: current version [" .. fmt(new_version) .. "], new version: [" .. fmt(new_version) .. "]")
+    if new_version <= version then
+        return
+    end
+    debug("upgrade: downloading new version")
+    local h = http.get(base_url .. "/kernel", data)
+    local rcode = h.getResponseCode()
+    if rcode ~= 200 then
+        debug("upgrade: failed+skipped, bad status code [" .. fmt(rcode) .. "]")
+        h.close()
+        return false
+    end
+    local new_kernel = h.readAll()
+    h.close()
+    debug("upgrade: flashing new version")
+    local path = "/startup"
+    local tmp_path = path .. ".tmp"
+    local h = fs.open(tmp_path, "w")
+    h.write(new_kernel)
+    h.close()
+    fs.delete(path)
+    fs.move(tmp_path, path)
+    debug("upgrade: booting new version now")
+    os.sleep(1)
+    os.reboot()
 end
 
 (function()
@@ -159,6 +200,9 @@ end
         debug("kernel: server run complete")
         return
     end
+
+    -- Upgrade kernel automatically if required.
+    upgradeKernel()
 
     -- Initialize state.
     debug("initializing turtle state")
@@ -212,10 +256,11 @@ end
         debug("orientation required")
         local coord, err = orientate()
         if err ~= nil then
-            fatal_err("orientation failed, error: " .. fmt(err))
+            fatalError("orientation failed, error: " .. fmt(err))
             return true
         end
         pos = coord
+        fs_state_put("pos", pos)
         debug("orientation complete: " .. fmt(pos))
         return false
     end)
@@ -238,8 +283,8 @@ end
             refuel_err = refuel_err,
             fuel_lvl = turtle.getFuelLevel(),
         })
-        local h = http.post(base_url + "/report", data)
-        local rcode = ret.getResponseCode()
+        local h = http.post(base_url .. "/report", data)
+        local rcode = h.getResponseCode()
         if rcode ~= 200 then
             debug("reporting: failed, bad status code [" .. tostring(rcode) .. "]")
             h.close()

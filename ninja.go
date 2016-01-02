@@ -3,6 +3,7 @@ package main
 import(
     "fmt"
     "log"
+    "bytes"
     "net/http"
     "github.com/yuin/gopher-lua"
 )
@@ -57,10 +58,19 @@ func getKernel(w http.ResponseWriter, r *http.Request) {
 }
 
 func getVersion(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte(fmt.Sprintf("%d", kern_version)))
+    w.Header().Set("Content-Type", "text/plain")
+    w.Write([]byte(fmt.Sprintf("%d", kern_version)))
 }
 
 func postReport(w http.ResponseWriter, r *http.Request) {
-
+    w.Header().Set("Content-Type", "text/plain")
+    w.Write([]byte(fmt.Sprintf("%d", kern_version)))
+    var buf bytes.Buffer
+    _, err := buf.ReadFrom(r.Body)
+    if err != nil {
+        log.Printf("reading report body failed: %v\n", err)
+        return
+    }
+    //err := r.ParseMultipartForm(40 * 1000 * 1000)
+    fmt.Printf("incoming report: %v", buf.String())
 }

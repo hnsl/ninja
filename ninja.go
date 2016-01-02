@@ -5,6 +5,7 @@ import(
     "log"
     "bytes"
     "net/http"
+    "encoding/json"
     "github.com/yuin/gopher-lua"
 )
 
@@ -72,5 +73,11 @@ func postReport(w http.ResponseWriter, r *http.Request) {
         return
     }
     //err := r.ParseMultipartForm(40 * 1000 * 1000)
-    fmt.Printf("incoming report: %v", buf.String())
+    var report interface{}
+    err = json.Unmarshal(buf.Bytes(), &report)
+    if err != nil {
+        log.Printf("decoding report body failed: %v\n", err)
+        return
+    }
+    fmt.Printf("incoming report: %v\n", report)
 }

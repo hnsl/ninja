@@ -24,7 +24,7 @@ function fmt(x)
     if is_server then
         return JSON:encode(x)
     else
-    return textutils.serializeJSON(x)
+        return textutils.serializeJSON(x)
     end
 end
 

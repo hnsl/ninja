@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 6
+version = 30
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -16,6 +16,11 @@ local look_fwd = 0
 
 -- Debugging.
 function fmt(x)
+    if x == nil then
+        return "null"
+    elseif type(x) == "string" then
+        return x
+    end
     if is_server then
         return JSON:encode(x)
     else
@@ -24,7 +29,7 @@ function fmt(x)
 end
 
 function debug(x)
-    print(type(x) == "string" and x or fmt(x))
+    print(fmt(x))
 end
 
 -- String splitting.
@@ -308,7 +313,7 @@ end
 function upgradeKernel()
     debug("checking for kernel upgrade")
     local h = http.get(base_url .. "/version", data)
-    local rcode = h.getResponseCode()
+    local rcode = (h ~= nil and h.getResponseCode()) or 0
     if rcode ~= 200 then
         debug("upgrade: failed+skipped, bad status code [" .. fmt(rcode) .. "]")
         h.close()
@@ -382,16 +387,16 @@ end
     local cur_rot = fs_state_get("cur_rot", nil)
     local work_q = fs_state_get("work_q", {})
     local fatal_err = nil
-    local refuel_err = false
+    local refuel_err = nil
 
     local refuel_min = 100
     local refuel_max = 32 * 80
 
-    local fatalError = (function(err)
+    function fatalError(err)
         local full_err = "fatal error: " .. fmt(err)
         debug(full_err)
         fatal_err = full_err
-    end)
+    end
 
     -- Moving and rotating.
     function turn(left)
@@ -406,8 +411,10 @@ end
             return false
         end
         -- Update current rotation.
-        cur_rot = vec3_rot90_y(cur_rot, true)
+        cur_rot = vec3_rot90_y(cur_rot, left)
         fs_state_put("cur_rot", cur_rot)
+        -- Turning is racy so we need to sleep a little to slow rate.
+        os.sleep(0.5)
         return true
     end
 
@@ -454,14 +461,15 @@ end
         -- We expect dir to be an orthogonal unit vector.
         local can_move = true
         local move_ok = false
+        debug("move: dir " .. fmt(dir))
         -- Handle trivial y movement first.
         if vec_equal(dir, {0, 1, 0}) then
-            can_move = turtle.detectUp()
+            can_move = not turtle.detectUp()
             if can_move then
                 move_ok = turtle.up()
             end
         elseif vec_equal(dir, {0, -1, 0}) then
-            can_move = turtle.detectDown()
+            can_move = not turtle.detectDown()
             if can_move then
                 move_ok = turtle.down()
             end
@@ -475,28 +483,33 @@ end
                     return false
                 end
             end
-            can_move = turtle.detect()
+            can_move = not turtle.detect()
             if can_move then
                 move_ok = turtle.forward()
             end
         end
         if move_ok then
-            if can_move then
-                debug("move error: unexpected move failure")
-            end
-            return false
-        else
             -- Move successful, update position.
             last_mdir = dir
             cur_pos = vec_add(cur_pos, dir)
             fs_state_put("cur_pos", cur_pos)
+            -- Moving is racy so we need to sleep a little to slow rate.
+            os.sleep(0.5)
             return true
+        else
+            if can_move then
+                debug("move error: unexpected move failure")
+            end
+            return false
         end
     end
 
-    function tryMoveOne(dst, close)
+    -- Tries to move one step closer to destination.
+    -- Returns true if reached destination within close range.
+    function step(dst, close)
         -- Calculate distance and see if arrived ok.
         local cur_dist = vec_l1dist(cur_pos, dst)
+        debug("moving one step: " .. fmt(cur_pos) .. ", " .. fmt(dst) .. ", dist: " .. fmt(cur_dist))
         if cur_dist <= close then
             return true
         end
@@ -505,6 +518,11 @@ end
             cur_best_dist = cur_dist
             cur_pivot = nil
             cur_frustration = 0
+        end
+        if turtle.getFuelLevel() <= 0 then
+            debug("step will fail: out of fuel!")
+            os.sleep(5)
+            return false
         end
         if cur_pivot == nil then
             -- Try first moving in current move direction if it brings us closer.
@@ -539,12 +557,12 @@ end
             debug("move: stuck - pivoting")
             -- Dim0 is the blocked dimension, pick another random dimension.
             -- Together these two dimensions form a plane we are rotating in.
-            local dim0 = vec_dim(blocked_dir)
-            local dim1 = ((dim + math.random(3, 4)) % 3) + 1
+            local dim1 = vec_dim(blocked_dir)
+            local dim2 = ((dim1 + math.random(3, 4)) % 3) + 1
             local rdir = math.random(0, 1) == 1
             cur_pivot = {
-                dim0 = dim0,
                 dim1 = dim1,
+                dim2 = dim2,
                 -- The blocked coordinate we are pivoting around.
                 bcoord = vec_add(cur_pos, blocked_dir),
                 -- Pick a random rotation direction.
@@ -563,7 +581,10 @@ end
         -- as the rotation direction is random. It only needs to be deterministic
         -- after cur_pivot has been defined to ensure we are always rotating in
         -- the same direction during a single pivotation session.
-        local neigh_vec2 = {cur_pos[dim0] - cur_pos[dim0], cur_pos[dim1] - cur_pos[dim1]}
+        local neigh_vec2 = {
+            cur_pos[cur_pivot.dim1] - cur_pivot.bcoord[cur_pivot.dim1],
+            cur_pos[cur_pivot.dim2] - cur_pivot.bcoord[cur_pivot.dim2],
+        }
         local neigh_id = vec2_neighbour_v2id(neigh_vec2)
         local neigh_id_next
         if cur_pivot.rdir then
@@ -572,11 +593,12 @@ end
             neigh_id_next = ((neigh_id + 8) % 8) + 1
         end
         local neigh_vec2_next = vec2_neighbour_id2v(neigh_id_next)
-        local neigh_vec3 = {cur_pos[1], cur_pos[2], cur_pos[3]}
-        neigh_vec3[dim0] = neigh_vec2_next[0]
-        neigh_vec3[dim1] = neigh_vec2_next[1]
+        local neigh_vec3 = {cur_pivot.bcoord[1], cur_pivot.bcoord[2], cur_pivot.bcoord[3]}
+        neigh_vec3[cur_pivot.dim1] = neigh_vec3[cur_pivot.dim1] + neigh_vec2_next[1]
+        neigh_vec3[cur_pivot.dim2] = neigh_vec3[cur_pivot.dim2] + neigh_vec2_next[2]
         local pivot_dir = vec_sub(neigh_vec3, cur_pos)
-        local move_ok = move(try_dir)
+        debug("move: pivot dir: " .. fmt(pivot_dir) .. " (" .. fmt(neigh_vec3) .. ", " .. fmt(neigh_vec2_next) .. ")")
+        local move_ok = move(pivot_dir)
         if not move_ok then
             -- We where blocked, update blocked coordinate to pivot around it.
             cur_pivot.bcoord = neigh_vec3
@@ -609,33 +631,26 @@ end
             cur_dst = dst
             forgetMove()
         end
-        local i = 1
         while true do
             -- Refuel periodically if required.
-            if i == 1 then
-                if not manageFuel() then
-                    debug("move: warning - refuel failed")
-                end
+            if not manageFuel() then
+                debug("move: warning - refuel failed")
             end
-            i = (i % 10) + 1
-            local ret = tryMoveOne(dst, close)
-            if ret then
+            -- Try move one step now.
+            if step(dst, close) then
                 -- Moving sufficiently close to desination was successful.
                 cur_dst = nil
                 forgetMove()
                 return
-            elseif not ret then
-                -- Stuck or unexpected move failure.
-                -- Sleep 1 second before trying to move again.
-                os.sleep(1)
-                break
             end
         end
     end
 
     function manageFuel()
-        if refuel_err then
-            return false
+        if refuel_err ~= nil then
+            if os.clock() - refuel_err < 30 then
+                return false
+            end
         end
         local refuel_lvl = turtle.getFuelLevel()
         if refuel_lvl > refuel_min then
@@ -647,12 +662,13 @@ end
             local err = tryRefuel(required)
             if err then
                 debug("refueling failed: " .. fmt(err))
-                refuel_err = true
+                refuel_err = os.clock()
                 return false
             end
             local refuel_lvl = turtle.getFuelLevel()
             if refuel_lvl >= refuel_max then
                 debug("refueling complete")
+                refuel_err = nil
                 return true
             end
         end
@@ -687,7 +703,10 @@ end
     end)
 
     local actionJobExec = (function()
-        debug("todo: exec job")
+        --debug("todo: exec job")
+        debug("moving")
+        moveTo({78, 65, 808}, 0)
+        debug("move complete")
         return true
     end)
 
@@ -740,14 +759,14 @@ end
         }
         for i,action in ipairs(actionSequence) do
             if fatal_error then
-                debug("fatal error in brain: enabling permanent apathy")
-                return
+                return false
             end
             cur_action = action.name
             if action.fn() then
-                return
+                break
             end
         end
+        return true
     end)
     parallel.waitForAny((function()
         -- Report every 30 seconds.
@@ -758,7 +777,10 @@ end
     end), (function()
         -- Brain tick with a one second rate limit in case of hysterical panic.
         while true do
-            brainTick()
+            if not brainTick() then
+                debug("fatal error in brain: enabling permanent apathy")
+                return
+            end
             sleep(1)
         end
     end))

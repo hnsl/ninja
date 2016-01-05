@@ -81,7 +81,7 @@ func postReport(w http.ResponseWriter, r *http.Request) {
 		log.Printf("reading report body failed: %v\n", err)
 		return
 	}
-	// fmt.Printf("incoming raw report: %v\n", buf.String())
+	fmt.Printf("incoming raw report: %v\n", buf.String())
 	//err := r.ParseMultipartForm(40 * 1000 * 1000)
 	var t turtle
 	err = json.Unmarshal(buf.Bytes(), &t)

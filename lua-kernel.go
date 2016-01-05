@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 35
+version = 36
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -231,50 +231,34 @@ end
 
 -- Turtle robot logic.
 
-function orientate_component()
-    local comp = 0
-    for i = 0, 3, 1 do
-        local success, bdata
-        if (i % 2) == 0 then
-            if not turtle.detectUp() then
-                return nil, "missing up block"
-            end
-            success, bdata = turtle.inspectUp()
-        else
-            if not turtle.detectDown() then
-                return nil, "missing down block"
-            end
-            success, bdata = turtle.inspectDown()
-        end
-        if not success then
-            return nil, ("inspect failed: " .. fmt(bdata))
-        end
-        if bdata.name ~= orient_block_name then
-            return nil, ("invalid block: " .. fmt(bdata.name))
-        end
-        local v4b = bdata.metadata
-        comp = comp + v4b * (2 ^ (4 * i))
-        if (i % 2) ~= 0 then
-            if not turtle.forward() then
-                return nil, "failed moving forward"
-            end
-        end
-    end
-    return comp, nil
-end
-
 function orientate()
-    local coord = {}
-    for i = 1, 3, 1 do
-        debug("orienting component [" .. i .. "]")
-        local comp, err = orientate_component()
-        if err then
-            return nil, err
-        end
-        debug("component [" .. i .. "]: [" .. comp .. "]")
-        coord[i] = comp
+    -- Use hard coded peers.
+    local peers = {
+        ["10.1"] = {
+            pos = {50, 118, 827},
+            rot = {-1, 0, 0},
+        },
+    }
+    local down_ok, det_down = turtle.inspectDown()
+    if not down_ok then
+        return false, nil
     end
-    return coord, nil
+    if det_down.name ~= orient_block_name then
+        return false, nil
+    end
+    local up_ok, det_up = turtle.inspectUp()
+    if not up_ok then
+        return false, nil
+    end
+    if det_up.name ~= orient_block_name then
+        return false, nil
+    end
+    local index = (tostring(det_down.metadata) .. "." .. tostring(det_up.metadata))
+    local orient = peers[index]
+    if orient == nil then
+        return false, nil
+    end
+    return true, orient
 end
 
 function report()
@@ -1091,23 +1075,23 @@ end
     end)
 
     local actionMngOrient = (function()
-        if cur_pos ~= nil then
+        if cur_pos ~= nil and cur_rot ~= nil then
             return false
         end
         debug("orientation required")
-        local coord, err = orientate()
-        if err ~= nil then
-            fatalError("orientation failed, error: " .. fmt(err))
+        local ok, orient = orientate()
+        if not ok then
+            fatalError("orientation failed")
             return true
         end
         -- Set oriented position.
-        cur_pos = coord
+        cur_pos = orient.pos
         fs_state_put("cur_pos", cur_pos)
         -- Rotation after orientation is complete is +z.
-        cur_rot = {0, 0, 1}
+        cur_rot = orient.rot
         fs_state_put("cur_rot", cur_rot)
         debug("orientation complete: " .. fmt(cur_pos) .. " " .. fmt(cur_rot))
-        return false
+        return true
     end)
 
     local actionJobExec = (function()

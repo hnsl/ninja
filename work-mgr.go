@@ -100,7 +100,7 @@ func (s storageArea) getExportQ() qCoords {
 			s.Pos[2] + 1,
 		},
 		q_dir:     vec3{0, 0, -1},
-		o_q0_dir:  vec3{0, 0, 1},
+		o_q0_dir:  vec3{0, -1, 0},
 		q0_t0_dir: vec3{-1, 0, 0},
 	}
 }
@@ -114,7 +114,7 @@ func (s storageArea) getImportQ() qCoords {
 			s.Pos[2] + 1,
 		},
 		q_dir:     vec3{0, 0, -1},
-		o_q0_dir:  vec3{0, 0, 1},
+		o_q0_dir:  vec3{0, -1, 0},
 		q0_t0_dir: vec3{1, 0, 0},
 	}
 }

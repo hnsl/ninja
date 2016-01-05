@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 30
+version = 31
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -316,7 +316,9 @@ function upgradeKernel()
     local rcode = (h ~= nil and h.getResponseCode()) or 0
     if rcode ~= 200 then
         debug("upgrade: failed+skipped, bad status code [" .. fmt(rcode) .. "]")
-        h.close()
+        if h ~= nil then
+            h.close()
+        end
         return false
     end
     local new_version = tonumber(h.readAll())
@@ -350,12 +352,17 @@ end
 
 -- Returns inventory count.
 function inventoryCount()
-    local inv_count = {}
+    local inv_count = {
+        free_slots = 0,
+        grouped = {},
+    }
     for i = 1, 16 do
         local detail = turtle.getItemDetail(i)
-        if detail ~= nil then
+        if detail == nil then
+            inv_count.free_slots = inv_count.free_slots + 1
+        else
             local count = inv_count[detail.name] or 0
-            inv_count[detail.name] = count + detail.count
+            inv_count.grouped[detail.name] = count + detail.count
         end
     end
     return inv_count
@@ -385,7 +392,7 @@ end
     local last_mdir = {1, 0, 0} -- last move direction, required as looking up or down is not possible
     local cur_pos = fs_state_get("cur_pos", nil)
     local cur_rot = fs_state_get("cur_rot", nil)
-    local work_q = fs_state_get("work_q", {})
+    local cur_work = fs_state_get("cur_work", nil)
     local fatal_err = nil
     local refuel_err = nil
 
@@ -703,16 +710,38 @@ end
     end)
 
     local actionJobExec = (function()
-        --debug("todo: exec job")
-        debug("moving")
-        moveTo({78, 65, 808}, 0)
-        debug("move complete")
+        if cur_work == nil then
+            debug("no work available, waiting for report ok")
+            os.pullEvent("user.report-ok")
+            return true
+        end
+        -- Has work, execute it.
+        if cur_work.type == "go" then
+
+            debug("todo: go")
+        elseif cur_work.type == "suck" then
+
+            debug("todo: suck")
+        elseif cur_work.type == "drop" then
+
+            debug("todo: drop")
+        else
+            fatalError("unknown work type: " .. fmt(cur_work.type))
+        end
         return true
     end)
 
     -- Reporting.
     function try_report()
         debug("reporting: sending")
+        local work = nil
+        if cur_work ~= nil then
+            work = {
+                id = cur_work.id,
+                type = cur_work.type,
+                complete = cur_work.complete,
+            }
+        end
         local data = textutils.serializeJSON({
             version = version,
             label = os.getComputerLabel(),
@@ -723,7 +752,7 @@ end
             cur_frustration = cur_frustration,
             cur_pos = cur_pos,
             cur_rot = cur_rot,
-            work_q = work_q,
+            cur_work = work,
             fatal_err = fatal_err,
             refuel_err = refuel_err,
             fuel_lvl = turtle.getFuelLevel(),
@@ -744,9 +773,16 @@ end
             debug("reporting: failed, non-table response")
             return false
         end
-        debug("reporting: submitted ok")
+        debug("reporting: completed ok")
+        os.queueEvent("user.report-ok")
         return true
     end
+
+    function trigger_report()
+        os.queueEvent("user.report")
+    end
+
+    -- Main brain.
     local brainTick = (function()
         -- Actions in order of priority
         actionSequence = {
@@ -769,9 +805,15 @@ end
         return true
     end)
     parallel.waitForAny((function()
-        -- Report every 30 seconds.
+        -- Report whenever reporting is requested.
         while true do
+            os.pullEvent("user.report")
             report()
+        end
+    end), (function()
+        -- Report automatically every 30 seconds.
+        while true do
+            trigger_report()
             sleep(30)
         end
     end), (function()

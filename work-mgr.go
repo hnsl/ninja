@@ -28,7 +28,7 @@ type turtle struct {
 	Version        int
 	Label          turtleID
 	CurAction      string  `json:"cur_action"`
-	CurDst         int     `json:"cur_dst"`
+	CurDst         vec3    `json:"cur_dst"`
 	CurBestDist    int     `json:"cur_best_dist"`
 	CurPivot       []int   `json:"cur_pivot"`
 	CurFrustration int     `json:"cur_frustration"`

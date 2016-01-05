@@ -32,9 +32,9 @@ var tplJobSuck = `new_job = {
     id = %d,
     type = "suck",
     instructions = {
-        type: %s,
-        amount: %d,
-        dir: %s,
+        type = %s,
+        amount = %d,
+        dir = %s,
     },
 },
 `
@@ -53,7 +53,7 @@ var tplJobDrop = `new_job = {
     type = "drop",
     instructions = {
         to_drop = {%s},
-        dir: %s,
+        dir = %s,
     },
 },
 `
@@ -74,10 +74,10 @@ var tplJobQueue = `new_job = {
     id = %d,
     type = "queue",
     instructions = {
-        origin: %s,
-        q_dir: %s,
-        o_q0_dir: %s,
-        q0_t0_dir: %s,
+        origin = %s,
+        q_dir = %s,
+        o_q0_dir = %s,
+        q0_t0_dir = %s,
     },
 },
 `

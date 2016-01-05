@@ -285,7 +285,7 @@ func mgrDecideWork(t turtle) *string {
 		log.Printf("decide work: error: invalid turtle id: %v", t.Label)
 		return nil
 	}
-	area_id := areaID(strings.Join(label_parts[0:1], "."))
+	area_id := areaID(strings.Join(label_parts[0:2], "."))
 	area := areas[area_id]
 	if len(label_parts) != 3 {
 		log.Printf("decide work: error: invalid turtle area id: %v", t.Label)
@@ -422,16 +422,24 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		if cand == nil {
 			return nil
 		}
+
+		fmt.Printf("load candidate: %#v\n", cand)
+
 		// Has a load candidate now.
 		if !drop {
 			// Allocate export of this item to this turtle if have not already.
-			if s.ExportAllocs[t.Label][cand.iname] == 0 {
+			if s.ExportAllocs[t.Label][cand.iname] > 0 {
 				pending_area_changes = true
 				n_export_me := inv_x[cand.iname]
 				n_export_tot := s.Exporting[cand.iname]
 				// assert(n_export_tot <= n_export_me) - inv_c cannot be defined with larger value
 				s.Exporting[cand.iname] = n_export_tot - n_export_me
-				s.ExportAllocs[t.Label][cand.iname] = n_export_me
+				eallocs := s.ExportAllocs[t.Label]
+				if eallocs == nil {
+					eallocs = map[itemName]int{}
+					s.ExportAllocs[t.Label] = eallocs
+				}
+				eallocs[cand.iname] = n_export_me
 			}
 		}
 		// Are we at the box load position?

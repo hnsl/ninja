@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 31
+version = 33
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -384,6 +384,7 @@ end
     -- Initialize state.
     debug("initializing turtle state")
     local new_kernel = nil
+    local new_work = nil
     local cur_action = nil
     local cur_dst = nil
     local cur_best_dist = nil -- best distance so far, reset on new move
@@ -710,10 +711,16 @@ end
     end)
 
     local actionJobExec = (function()
-        if cur_work == nil then
-            debug("no work available, waiting for report ok")
-            os.pullEvent("user.report-ok")
-            return true
+        if cur_work == nil or cur_work.complete then
+            if new_work == nil then
+                debug("no work available, waiting for report ok")
+                os.pullEvent("user.report-ok")
+                return true
+            else
+                debug("executing new work")
+                cur_work = new_work
+                new_work = nil
+            end
         end
         -- Has work, execute it.
         if cur_work.type == "go" then
@@ -723,6 +730,9 @@ end
 
             debug("todo: suck")
         elseif cur_work.type == "drop" then
+
+            debug("todo: drop")
+        elseif cur_work.type == "queue" then
 
             debug("todo: drop")
         else
@@ -739,7 +749,7 @@ end
             work = {
                 id = cur_work.id,
                 type = cur_work.type,
-                complete = cur_work.complete,
+                complete = (cur_work.complete == true),
             }
         end
         local data = textutils.serializeJSON({
@@ -769,9 +779,13 @@ end
         h.close()
         -- Unserialize response table.
         local rsp = textutils.unserialize(raw_rsp)
-        if type(rsp) == "table" then
+        if type(rsp) ~= "table" then
             debug("reporting: failed, non-table response")
             return false
+        end
+        if rsp.new_job ~= nil then
+            -- We where assigned new work.
+            new_work = rsp.new_job
         end
         debug("reporting: completed ok")
         os.queueEvent("user.report-ok")

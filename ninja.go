@@ -89,14 +89,14 @@ func postReport(w http.ResponseWriter, r *http.Request) {
 		log.Printf("decoding report body failed: %v\n", err)
 		return
 	}
-	// fmt.Printf("incoming report: %#v\n", t)
+	fmt.Printf("incoming report: %#v\n", t)
 	// Update reported turtle data.
 	turtles[t.Label] = t
 	// Prepare response.
 	var rsp bytes.Buffer
 	// Decide new work for turtle.
 	work_rsp := ""
-	if t.CurWork == nil || t.CurWork.Complete {
+	if t.CurWork == nil {
 		work_ptr := decideWork(t)
 		if work_ptr == nil {
 			// Deciding work failed.
@@ -104,6 +104,7 @@ func postReport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		work_rsp = *work_ptr
+		fmt.Printf("new work decided: %s\n\n", work_rsp)
 	}
 	rsp.WriteString("{")
 	rsp.WriteString(work_rsp)

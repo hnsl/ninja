@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 33
+version = 35
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -178,6 +178,14 @@ function vec3_rot180_y(a)
         a[2],      -- new_y = 0 * x + 1 * y + 0 * z = y
         -1 * a[3], -- new_z = -sin(a) * x + 0 * y + cos(a) * z = -z
     }
+end
+
+-- inverts a direction (orhogonal unit vector)
+function vec3_inv_dir(a)
+    local out = {0, 0, 0}
+    local d = vec_dim(a)
+    out[d] = -a[d]
+    return out
 end
 
 -- Returns the dimensions of a plane id.
@@ -368,6 +376,368 @@ function inventoryCount()
     return inv_count
 end
 
+-- Packs the inventory at position pos by moving it to other positions.
+-- pos: position to move inventory from.
+-- high: highest position to consider moving to.
+-- defrag: when true defrags inventory by moving remaining to lowest empty.
+function inventoryPack(pos, high, defrag)
+    local dt_from = turtle.getItemDetail(pos)
+    if dt_from == nil then
+        return
+    end
+	local ok = turtle.select(pos)
+    if not ok then
+        debug("inventoryPack: turtle.select() failed")
+        return
+    end
+    -- Find free slots to move inventory to.
+    local low_free = 0
+    for i = 1, high do
+        if not (function()
+            if i == pos then
+                return true
+            end
+            local dt_to = turtle.getItemDetail(i)
+            if dt_to == nil then
+                if low_free == 0 then
+                    low_free = i
+                end
+                return true
+            end
+            local spc = turtle.getItemSpace(i)
+            if spc == 0 then
+                return true
+            end
+            -- Found slot to move to, transfer.
+            turtle.transferTo(i)
+            -- Update details at pos and return if completed packing.
+            dt_from = turtle.getItemDetail(pos)
+            if dt_from == nil then
+                return false
+            end
+        end)() then
+            break
+        end
+    end
+    -- Defragment if requested.
+    if defrag and low_free ~= 0 and low_free < pos then
+        turtle.transferTo(low_free)
+    end
+end
+
+function executeWorkGo(work)
+    local wp_stack = work.instructions.waypoint_stack
+    if #wp_stack == 0 then
+        -- Complete.
+        work.complete = true
+    else
+        -- Move to next coordinate.
+        local wp = wp_stack[#wp_stack]
+        moveTo(wp, 0)
+        -- Update work if still current.
+        -- This is cancellation and work update safe.
+        table.remove(wp_stack)
+    end
+    saveCurWork()
+end
+
+function executeWorkSuck(work)
+    -- Look in the direction we want to suck.
+    local instr = work.instructions
+    local ok, lret = look(instr.dir)
+    if not ok then
+        workError("executeWorkSuck: turning failed")
+        return
+    end
+    local suck_done
+    local suck_total = 0
+    while true do
+        -- Check if specific suck is complete.
+        if instr.item ~= nil and instr.amount <= 0 then
+            suck_done = true
+            break
+        end
+        -- Find available occupied slot.
+        local dst_slot = 0
+        local pre_amount
+        if instr.item ~= nil then
+            for i = 1, 16 do
+                local detail = turtle.getItemDetail(i)
+                if detail ~= nil and detail.name == instr.item then
+                    local spc = turtle.getItemSpace(i)
+                    if spc > 0 then
+                        dst_slot = i
+                        pre_amount = detail.count
+                        break
+                    end
+                end
+            end
+        end
+        if dst_slot == 0 then
+            -- Suck to empty slot.
+            for i = 1, 16 do
+                if turtle.getItemCount(i) == 0 then
+                    dst_slot = i
+                    pre_amount = 0
+                    break
+                end
+            end
+            if dst_slot == 0 then
+                -- No free slot to suck to, we definitely want to consider
+                -- us done here both in the general and specific case.
+                -- The controller should notice our out of space condition
+                -- and react accordingly.
+                debug("suck: complete: no free slot remains")
+                suck_done = true
+                break
+            end
+        end
+        -- Select destination slot to suck to.
+    	local select_ok = turtle.select(dst_slot)
+        if not select_ok then
+            workError("executeWorkSuck: turtle.select() failed")
+            return
+        end
+        -- Suck now.
+    	local suck_ok
+        if lret == look_fwd then
+            suck_ok = turtle.suck(instr.amount)
+        elseif lret == look_up then
+            suck_ok = turtle.suckUp(instr.amount)
+        elseif lret == look_down then
+            suck_ok = turtle.suckDown(instr.amount)
+        end
+        if not suck_ok then
+            -- No more items. We are done only if general suck and got more than one item.
+            debug("suck: no more items")
+            suck_done = (instr.item == nil and suck_total > 0)
+            break
+        end
+        -- Got at least one item.
+        -- Sanity check, count the number of sucked items and adjust amount.
+        local detail = turtle.getItemDetail(dst_slot)
+        if detail == nil then
+            fatalError("inventory error, nil slot #" .. fmt(dst_slot) .. " after successful suck")
+            return
+        end
+        if instr.item ~= nil and detail.name ~= instr.item then
+            fatalError("inventory error, suck produced the wrong item: got: " ..
+                fmt(detail.name) .. ", expected: " .. fmt(instr.item))
+            return
+        end
+        local this_total = detail.count - pre_amount
+        suck_total = suck_total + this_total
+        instr.amount = instr.amount - this_total
+        -- We need to pack after sucking if generic suck.
+        -- Packing not required for specific suck since partial stacks are
+        -- chosen over free slots.
+        if instr.item == nil then
+            inventoryPack(dst_slot, 16, false)
+        end
+    end
+    if suck_done then
+        -- Job complete. Cases:
+        -- 1. Specific suck and amount reached. (normal)
+        -- 2. Out of free slots. (normal)
+        -- 3. General suck and out of items in container after
+        --    at least one successfully sucked item. (normal)
+        work.complete = true
+        saveCurWork()
+    else
+        -- Job not complete. Cases:
+        -- 1. General suck and out of items in container before even one item
+        --    was sucked. This is a normal blocking condition, waiting for the
+        --    container to get more than zero item before continuing. (normal)
+        -- 2. Specific suck and out of items in container before
+        --    the full amount of requested items to suck was reached.
+        --    This is generally an inventory problem that is temporary or that
+        --    a human should fix manually, therfore we wait and try again.
+        if suck_total > 0 then
+            saveCurWork()
+        end
+        os.sleep(2)
+    end
+end
+
+function executeWorkDrop(work)
+    -- Look in the direction we want to drop.
+    local instr = work.instructions
+    local ok, lret = look(instr.dir)
+    if not ok then
+        workError("executeWorkDrop: turning failed")
+        return
+    end
+    -- Clone items to drop.
+    local new_items = {}
+    for item, amount in ipairs(instr.items) do
+        if amount ~= nil and amount > 0 then
+            new_items[item] = amount
+        end
+    end
+    -- Go through all slots.
+    local out_of_space = false
+    local drop_total = 0
+    for i = 1, 16 do
+        if not (function()
+            local detail = turtle.getItemDetail(slot)
+            if detail == nil then
+                return true
+            end
+            local drop_count = new_items[detail.name]
+            if drop_count == nil or drop_count <= 0 then
+                return true
+            end
+            -- Select destination slot to drop from.
+            local select_ok = turtle.select(i)
+            if not select_ok then
+                workError("executeWorkDrop: turtle.select() failed")
+                return false
+            end
+            -- Drop now.
+            local suck_ok
+            if lret == look_fwd then
+                suck_ok = turtle.drop(drop_count)
+            elseif lret == look_up then
+                suck_ok = turtle.dropUp(drop_count)
+            elseif lret == look_down then
+                suck_ok = turtle.dropDown(drop_count)
+            end
+            -- Count the number of dropped items.
+            local post_count = turtle.getItemCount(i)
+            local n_dropped = detail.count - post_count
+            if n_dropped < drop_count then
+                -- Container is partially out of space.
+                out_of_space = true
+            end
+            drop_total = drop_total + n_dropped
+            local remaining = drop_count - n_dropped
+            if remaining > 0 then
+                new_items[detail.name] = remaining
+            else
+                new_items[detail.name] = nil
+            end
+            -- When one item or more remains after dropping we have a partial
+            -- stack that must be packed.
+            if post_count > 0 then
+                inventoryPack(i, 16, false)
+            end
+        end)() then
+            break
+        end
+    end
+    -- Check if we are done.
+    if #new_items == 0 or not out_of_space then
+        if not out_of_space then
+            -- This is definitely worth logging to a better place.
+            -- It's not fatal as a race condition between side effects of work and storing updated work
+            -- can cause it. In this condition the controller should detect the problem and react appropriately.
+            workError("executeWorkDrop: asked to drop non-existing items: " .. fmt(new_items))
+        end
+        -- Job complete.
+        work.items = nil
+        work.complete = true
+        saveCurWork()
+    else
+        -- Not done. All items have not been dropped yet because container
+        -- is out of space. Wait for container to free up.
+        workError("executeWorkDrop: container is out of space")
+        if drop_total > 0 then
+            work.items = new_items
+            saveCurWork()
+        end
+        os.sleep(2)
+    end
+end
+
+function executeWorkQueue(work)
+    local non_aggr_low_prio_wait = (function()
+        -- Wait in queue non-agressively. Report often since waiting in
+        -- queue is likely low priority work.
+        if timeSinceReport() > 6 then
+            trigger_report()
+        end
+        os.sleep(2)
+    end)
+    local instr = work.instructions
+    if instr.state == nil then
+        -- First attempt to reach queue t0.
+        debug("queue: walking to @ " .. fmt(instr.origin))
+        local t0_pos = vec_add(vec_add(instr.origin, instr.o_q0_dir), instr.q0_t0_dir)
+        moveTo(t0_pos, 0)
+        instr.state = 1
+        saveCurWork()
+        debug("queue: reached queue t lane, scanning for q slot")
+        return
+    elseif instr.state == 1 then
+        debug("queue: moving in t lane")
+        while true do
+            -- Attempt to go from t to q first.
+            local t2q_ok = move(vec3_inv_dir(instr.q0_t0_dir))
+            if t2q_ok then
+                debug("queue: reached queue q lane, queuing for q0")
+                instr.state = 2
+                saveCurWork()
+                return
+            end
+            -- Face in reverse queue direction to walk down t.
+            local tfwd_ok = move(vec3_inv_dir(instr.q_dir))
+            if not tfwd_ok then
+                debug("stuck in queue t lane (reached end?)")
+                non_aggr_low_prio_wait()
+                return
+            end
+        end
+    elseif instr.state == 2 then
+        debug("queue: moving in q lane")
+        local q0_pos = vec_add(instr.origin, instr.o_q0_dir)
+        while true do
+            -- Have we reached q0?
+            local orient = curOrient()
+            if vec_equal(q0_pos, orient.pos) then
+                debug("queue: reached queue q0, queueing for o")
+                instr.state = 3
+                saveCurWork()
+                return
+            end
+            -- Attempt to move forward in queue.
+            local qfwd_ok = move(instr.q_dir)
+            if not qfwd_ok then
+                debug("waiting in queue q lane")
+                non_aggr_low_prio_wait()
+                return
+            end
+        end
+    elseif instr.state == 3 then
+        debug("queue: moving from q0 to o")
+        local o_ok = move(vec3_inv_dir(instr.o_q0_dir))
+        if o_ok then
+            debug("queue: reached o, queuing complete")
+            work.complete = true
+            saveCurWork()
+            return
+        else
+            non_aggr_low_prio_wait()
+            return
+        end
+    else
+        fatalError("queue: unknown state " .. fmt(instr.state))
+    end
+end
+
+function executeWork(work)
+    if work.type == "go" then
+        executeWorkGo(work)
+    elseif work.type == "suck" then
+        executeWorkSuck(work)
+    elseif work.type == "drop" then
+        executeWorkDrop(work)
+    elseif work.type == "queue" then
+        executeWorkQueue(work)
+    else
+        fatalError("unknown work type: " .. fmt(work.type))
+    end
+end
+
 (function()
     if is_server then
         debug("kernel: server run complete")
@@ -396,6 +766,8 @@ end
     local cur_work = fs_state_get("cur_work", nil)
     local fatal_err = nil
     local refuel_err = nil
+    local work_err = nil
+    local last_report_time = 0
 
     local refuel_min = 100
     local refuel_max = 32 * 80
@@ -404,6 +776,28 @@ end
         local full_err = "fatal error: " .. fmt(err)
         debug(full_err)
         fatal_err = full_err
+    end
+
+    function workError(err)
+        local full_err = "work error: " .. fmt(err)
+        debug(full_err)
+        work_err = full_err
+    end
+
+    function curOrient()
+        return {pos = cur_pos, rot = cur_rot}
+    end
+
+    function timeSinceReport()
+        return os.clock() - last_report_time
+    end
+
+    -- When updates to a reference to what is presumably the current work
+    -- has been made, this function is called to save those updates if that
+    -- work is still the current work. If it's not the current work this
+    -- function has no effect.
+    function saveCurWork()
+        fs_state_put("cur_work", cur_work)
     end
 
     -- Moving and rotating.
@@ -560,7 +954,13 @@ end
                     table.insert(blocked_dirs, try_dir)
                 end
             end
-            -- We're stuck. Pick a random blocked dir.
+            -- We're stuck.
+            if cur_dist <= 1 then
+                debug("step failed, destination occupied")
+                os.sleep(2)
+                return false
+            end
+            -- Pivot, Pick a random blocked dir.
             local blocked_dir = blocked_dirs[math.random(1, #blocked_dirs)]
             debug("move: stuck - pivoting")
             -- Dim0 is the blocked dimension, pick another random dimension.
@@ -711,39 +1111,31 @@ end
     end)
 
     local actionJobExec = (function()
+        -- Load new work now if available.
+        if new_work ~= nil then
+            debug("loading new work")
+            cur_work = new_work
+            new_work = nil
+            work_err = nil
+            saveCurWork()
+        end
         if cur_work == nil or cur_work.complete then
-            if new_work == nil then
-                debug("no work available, waiting for report ok")
-                os.pullEvent("user.report-ok")
-                return true
-            else
-                debug("executing new work")
-                cur_work = new_work
-                new_work = nil
-            end
+            debug("no work available, waiting for report ok")
+            os.pullEvent("user.report-ok")
+            return true
         end
-        -- Has work, execute it.
-        if cur_work.type == "go" then
-
-            debug("todo: go")
-        elseif cur_work.type == "suck" then
-
-            debug("todo: suck")
-        elseif cur_work.type == "drop" then
-
-            debug("todo: drop")
-        elseif cur_work.type == "queue" then
-
-            debug("todo: drop")
-        else
-            fatalError("unknown work type: " .. fmt(cur_work.type))
-        end
+        -- Has work, execute it. When work can be partially completed
+        -- (and/or cancelled) this function returns and should be safe/correct
+        -- to call multiple times since all work progress is stored in the
+        -- job object we pass to it.
+        executeWork(cur_work)
         return true
     end)
 
     -- Reporting.
     function try_report()
         debug("reporting: sending")
+        last_report_time = os.clock()
         local work = nil
         if cur_work ~= nil then
             work = {
@@ -765,6 +1157,7 @@ end
             cur_work = work,
             fatal_err = fatal_err,
             refuel_err = refuel_err,
+            work_err = work_err,
             fuel_lvl = turtle.getFuelLevel(),
             inv_count = inventoryCount(),
         })
@@ -793,6 +1186,7 @@ end
     end
 
     function trigger_report()
+        last_report_time = os.clock()
         os.queueEvent("user.report")
     end
 

@@ -32,7 +32,7 @@ var tplJobSuck = `new_job = {
     id = %d,
     type = "suck",
     instructions = {
-        type = %s,
+        item = %s,
         amount = %d,
         dir = %s,
     },
@@ -40,34 +40,34 @@ var tplJobSuck = `new_job = {
 `
 
 func makeJobSuck(id int, iname *itemName, amount int, dir vec3) string {
-    type_srl := "nil"
+    item_srl := "nil"
     if iname != nil {
-        type_srl = strconv.Quote(string(*iname))
+        item_srl = strconv.Quote(string(*iname))
     }
     dir_srl := luaSerialVec3(dir)
-    return fmt.Sprintf(tplJobSuck, id, type_srl, amount, dir_srl)
+    return fmt.Sprintf(tplJobSuck, id, item_srl, amount, dir_srl)
 }
 
 var tplJobDrop = `new_job = {
     id = %d,
     type = "drop",
     instructions = {
-        to_drop = {%s},
+        items = {%s},
         dir = %s,
     },
 },
 `
 
 func makeJobDrop(id int, items map[itemName]int, dir vec3) string {
-    to_drop_parts := make([]string, len(items))
+    items_parts := make([]string, len(items))
     i := 0
     for iname, count := range(items) {
-        to_drop_parts[i] = fmt.Sprintf("[%s] = %d,", strconv.Quote(string(iname)), count)
+        items_parts[i] = fmt.Sprintf("[%s] = %d,", strconv.Quote(string(iname)), count)
         i++
     }
-    to_drop_srl := strings.Join(to_drop_parts, "")
+    items_srl := strings.Join(items_parts, "")
     dir_srl := luaSerialVec3(dir)
-    return fmt.Sprintf(tplJobDrop, id, to_drop_srl, dir_srl)
+    return fmt.Sprintf(tplJobDrop, id, items_srl, dir_srl)
 }
 
 var tplJobQueue = `new_job = {

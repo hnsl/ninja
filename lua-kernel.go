@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 36
+version = 39
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -353,7 +353,7 @@ function inventoryCount()
         if detail == nil then
             inv_count.free_slots = inv_count.free_slots + 1
         else
-            local count = inv_count[detail.name] or 0
+            local count = inv_count.grouped[detail.name] or 0
             inv_count.grouped[detail.name] = count + detail.count
         end
     end
@@ -1146,10 +1146,12 @@ end
             inv_count = inventoryCount(),
         })
         local h = http.post(base_url .. "/report", data)
-        local rcode = h.getResponseCode()
+        local rcode = (h ~= nil and h.getResponseCode() or 0)
         if rcode ~= 200 then
             debug("reporting: failed, bad status code [" .. tostring(rcode) .. "]")
-            h.close()
+            if h ~= nil then
+                h.close()
+            end
             return false
         end
         local raw_rsp = h.readAll()

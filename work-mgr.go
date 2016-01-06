@@ -25,6 +25,7 @@ type turtleID string
 type itemName string
 
 type turtle struct {
+	NewKernel      bool `json:"new_kernel"`
 	Version        int
 	Label          turtleID
 	CurAction      string  `json:"cur_action"`
@@ -125,17 +126,17 @@ type boxOrient struct {
 }
 
 func (bo boxOrient) loadPos() vec3 {
-	return vec3Add(bo.boxPos, bo.loadDir)
+	return vec3Sub(bo.boxPos, bo.loadDir)
 }
 
 func (s storageArea) getBoxOrient(id int) boxOrient {
 	out := boxOrient{}
 	pp := s.nBoxesPerPlane()
-	out.boxPos[1] = id/pp - 1
+	out.boxPos[1] = -id/pp - 2
 	plane_id := id % pp
-	if pp < s.XLen*2 {
+	if plane_id < s.XLen*2 {
 		out.boxPos[0] = -s.XLen + (plane_id % s.XLen)
-		if pp < s.XLen {
+		if plane_id < s.XLen {
 			out.boxPos[2] = -s.ZLen - 1
 			out.loadDir = vec3{0, 0, -1}
 		} else {
@@ -143,8 +144,9 @@ func (s storageArea) getBoxOrient(id int) boxOrient {
 			out.loadDir = vec3{0, 0, 1}
 		}
 	} else {
-		out.boxPos[2] = -s.ZLen + ((plane_id - s.XLen*2) % s.ZLen)
-		if pp < s.XLen {
+		z_id := (plane_id - s.XLen*2)
+		out.boxPos[2] = -s.ZLen + (z_id % s.ZLen)
+		if z_id < s.ZLen {
 			out.boxPos[0] = -s.XLen - 1
 			out.loadDir = vec3{-1, 0, 0}
 		} else {
@@ -154,6 +156,7 @@ func (s storageArea) getBoxOrient(id int) boxOrient {
 	}
 	// Convert relative position of box in inventory to world coordinate.
 	out.boxPos = vec3Add(s.Pos, out.boxPos)
+	// fmt.Printf("box orient %d %#v\n", id, out)
 	return out
 }
 
@@ -313,7 +316,7 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 	// Have we completed a box load that we should account for?
 	if lo_ptr := s.LoadOrders[t.Label]; lo_ptr != nil {
 		lo := *lo_ptr
-		if t.CurWork == nil {
+		if t.CurWork == nil || (t.CurWork.ID != lo.ID && t.CurWork.Complete) {
 			// Turtle did not get assigned work? Reassign load order.
 			log.Printf("storage work warning: turtle %v: current load order work: %#v,"+
 				" was unexpectedly not assigned", t.Label, lo)
@@ -422,9 +425,7 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		if cand == nil {
 			return nil
 		}
-
-		fmt.Printf("load candidate: %#v\n", cand)
-
+		// fmt.Printf("load candidate: %#v\n", cand)
 		// Has a load candidate now.
 		if !drop {
 			// Allocate export of this item to this turtle if have not already.
@@ -445,6 +446,7 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		// Are we at the box load position?
 		box_orient := s.getBoxOrient(cand.id)
 		box_load_pos := box_orient.loadPos()
+		fmt.Printf("box %#v %#v %v %v\n", cand, box_orient, box_load_pos, drop)
 		if vec3Equal(t.CurPos, box_load_pos) {
 			// Create load order job.
 			pending_area_changes = true
@@ -503,7 +505,7 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		}
 	}
 	tryHandleC := func() *string {
-		return tryHandleAC(inv_a, false)
+		return tryHandleAC(inv_c, false)
 	}
 	importQueue := func() string {
 		// Are we at the import position?
@@ -604,7 +606,7 @@ func makeQueueOrderJob(id int, q qCoords) string {
 }
 
 func storeJSON(path string, src interface{}) {
-	data, err := json.Marshal(src)
+	data, err := json.MarshalIndent(src, "", "\t")
 	check(err)
 	err = ioutil.WriteFile(path, data, 0644)
 	check(err)
@@ -632,6 +634,9 @@ func loadArea(area_id areaID, area_dir string) {
 		loadJSON(s.Path, s)
 		if s.ID != area_id {
 			panic(fmt.Sprintf("invalid storage id: %v, expected: %v", s.ID, area_id))
+		}
+		if s.LoadOrders == nil {
+			s.LoadOrders = map[turtleID]*loadOrder{}
 		}
 		s.Boxes = make([]storageBox, s.nBoxes())
 		files, err := ioutil.ReadDir(area_dir)

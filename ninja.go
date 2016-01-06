@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 var turtles = map[turtleID]turtle{}
@@ -95,19 +96,26 @@ func postReport(w http.ResponseWriter, r *http.Request) {
 	// Prepare response.
 	var rsp bytes.Buffer
 	// Decide new work for turtle.
-	work_rsp := ""
-	if t.CurWork == nil {
-		work_ptr := decideWork(t)
-		if work_ptr == nil {
-			// Deciding work failed.
-			writeRspInternalError(w)
-			return
-		}
-		work_rsp = *work_ptr
-		fmt.Printf("new work decided: %s\n\n", work_rsp)
+	if t.CurWork != nil {
+		fmt.Printf("existing work: %#v\n", *t.CurWork)
 	}
+	work_rsp := ""
+	work_ptr := decideWork(t)
+	if work_ptr == nil {
+		// Deciding work failed.
+		fmt.Printf("failed to decide work\n")
+		writeRspInternalError(w)
+		return
+	}
+	work_rsp = *work_ptr
+	fmt.Printf("work decision: %s\n\n", work_rsp)
 	rsp.WriteString("{")
 	rsp.WriteString(work_rsp)
+	if t.Version < kern_version && !t.NewKernel {
+		rsp.WriteString("new_kernel = ")
+		rsp.WriteString(strconv.Quote(lua_src_kernel))
+		rsp.WriteString(",")
+	}
 	rsp.WriteString("}")
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write(rsp.Bytes())

@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 39
+version = 53
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -302,6 +302,20 @@ function tryRefuel(required)
     end
 end
 
+function flashKernel(new_kernel)
+    debug("upgrade: flashing new version")
+    local path = "/startup"
+    local tmp_path = path .. ".tmp"
+    local h = fs.open(tmp_path, "w")
+    h.write(new_kernel)
+    h.close()
+    fs.delete(path)
+    fs.move(tmp_path, path)
+    debug("upgrade: booting new version now")
+    os.sleep(1)
+    os.reboot()
+end
+
 function upgradeKernel()
     debug("checking for kernel upgrade")
     local h = http.get(base_url .. "/version", data)
@@ -329,17 +343,7 @@ function upgradeKernel()
     end
     local new_kernel = h.readAll()
     h.close()
-    debug("upgrade: flashing new version")
-    local path = "/startup"
-    local tmp_path = path .. ".tmp"
-    local h = fs.open(tmp_path, "w")
-    h.write(new_kernel)
-    h.close()
-    fs.delete(path)
-    fs.move(tmp_path, path)
-    debug("upgrade: booting new version now")
-    os.sleep(1)
-    os.reboot()
+    flashKernel(new_kernel)
 end
 
 -- Returns inventory count.
@@ -377,30 +381,28 @@ function inventoryPack(pos, high, defrag)
     -- Find free slots to move inventory to.
     local low_free = 0
     for i = 1, high do
-        if not (function()
+        for _ = 1, 1 do
             if i == pos then
-                return true
+                break
             end
             local dt_to = turtle.getItemDetail(i)
             if dt_to == nil then
                 if low_free == 0 then
                     low_free = i
                 end
-                return true
+                break
             end
             local spc = turtle.getItemSpace(i)
             if spc == 0 then
-                return true
+                break
             end
             -- Found slot to move to, transfer.
             turtle.transferTo(i)
             -- Update details at pos and return if completed packing.
             dt_from = turtle.getItemDetail(pos)
             if dt_from == nil then
-                return false
+                return
             end
-        end)() then
-            break
         end
     end
     -- Defragment if requested.
@@ -484,12 +486,22 @@ function executeWorkSuck(work)
         end
         -- Suck now.
     	local suck_ok
-        if lret == look_fwd then
-            suck_ok = turtle.suck(instr.amount)
-        elseif lret == look_up then
-            suck_ok = turtle.suckUp(instr.amount)
-        elseif lret == look_down then
-            suck_ok = turtle.suckDown(instr.amount)
+        if instr.item == nil then
+            if lret == look_fwd then
+                suck_ok = turtle.suck()
+            elseif lret == look_up then
+                suck_ok = turtle.suckUp()
+            elseif lret == look_down then
+                suck_ok = turtle.suckDown()
+            end
+        else
+            if lret == look_fwd then
+                suck_ok = turtle.suck(instr.amount)
+            elseif lret == look_up then
+                suck_ok = turtle.suckUp(instr.amount)
+            elseif lret == look_down then
+                suck_ok = turtle.suckDown(instr.amount)
+            end
         end
         if not suck_ok then
             -- No more items. We are done only if general suck and got more than one item.
@@ -544,6 +556,7 @@ function executeWorkSuck(work)
 end
 
 function executeWorkDrop(work)
+    debug("dropping items")
     -- Look in the direction we want to drop.
     local instr = work.instructions
     local ok, lret = look(instr.dir)
@@ -552,39 +565,41 @@ function executeWorkDrop(work)
         return
     end
     -- Clone items to drop.
+    debug("dropping1: " .. fmt(instr))
     local new_items = {}
-    for item, amount in ipairs(instr.items) do
+    for item, amount in pairs(instr.items) do
         if amount ~= nil and amount > 0 then
             new_items[item] = amount
         end
     end
+    debug("dropping2: " .. fmt(new_items))
     -- Go through all slots.
     local out_of_space = false
     local drop_total = 0
     for i = 1, 16 do
-        if not (function()
-            local detail = turtle.getItemDetail(slot)
+        for _ = 1, 1 do
+            local detail = turtle.getItemDetail(i)
             if detail == nil then
-                return true
+                break
             end
             local drop_count = new_items[detail.name]
             if drop_count == nil or drop_count <= 0 then
-                return true
+                break
             end
+            debug("dropping " .. fmt(drop_count) ..  " "  .. fmt(detail.name) .. " in slot " .. fmt(i))
             -- Select destination slot to drop from.
             local select_ok = turtle.select(i)
             if not select_ok then
                 workError("executeWorkDrop: turtle.select() failed")
-                return false
+                return
             end
             -- Drop now.
-            local suck_ok
             if lret == look_fwd then
-                suck_ok = turtle.drop(drop_count)
+                turtle.drop(drop_count)
             elseif lret == look_up then
-                suck_ok = turtle.dropUp(drop_count)
+                turtle.dropUp(drop_count)
             elseif lret == look_down then
-                suck_ok = turtle.dropDown(drop_count)
+                turtle.dropDown(drop_count)
             end
             -- Count the number of dropped items.
             local post_count = turtle.getItemCount(i)
@@ -605,13 +620,11 @@ function executeWorkDrop(work)
             if post_count > 0 then
                 inventoryPack(i, 16, false)
             end
-        end)() then
-            break
         end
     end
     -- Check if we are done.
     if #new_items == 0 or not out_of_space then
-        if not out_of_space then
+        if #new_items > 0 then
             -- This is definitely worth logging to a better place.
             -- It's not fatal as a race condition between side effects of work and storing updated work
             -- can cause it. In this condition the controller should detect the problem and react appropriately.
@@ -1066,6 +1079,14 @@ end
         end
     end
 
+    local actionKernelUpdate = (function()
+        if new_kernel ~= nil then
+            debug("got new kernel, flashing it")
+            flashKernel(new_kernel)
+        end
+        return false
+    end)
+
     -- Fuel management.
     local actionFuelMng = (function()
         manageFuel()
@@ -1113,6 +1134,10 @@ end
         -- to call multiple times since all work progress is stored in the
         -- job object we pass to it.
         executeWork(cur_work)
+        if cur_work.complete then
+            -- Work complete, trigger report to get new work.
+            trigger_report()
+        end
         return true
     end)
 
@@ -1129,6 +1154,7 @@ end
             }
         end
         local data = textutils.serializeJSON({
+            new_kernel = (new_kernel ~= nil),
             version = version,
             label = os.getComputerLabel(),
             cur_action = cur_action,
@@ -1166,6 +1192,10 @@ end
             -- We where assigned new work.
             new_work = rsp.new_job
         end
+        if rsp.new_kernel ~= nil then
+            -- We where assigned new kernel.
+            new_kernel = rsp.new_kernel
+        end
         debug("reporting: completed ok")
         os.queueEvent("user.report-ok")
         return true
@@ -1180,15 +1210,17 @@ end
     local brainTick = (function()
         -- Actions in order of priority
         actionSequence = {
-            -- Priority 1: Ensure we have sufficient fuel to operate.
+            -- Priority 1: Ensure kernel is up to date.
+            {fn = actionKernelUpdate, name = "kernel"},
+            -- Priority 2: Ensure we have sufficient fuel to operate.
             {fn = actionFuelMng, name = "fuel"},
-            -- Priority 2: Ensure we have completed orientation.
+            -- Priority 3: Ensure we have completed orientation.
             {fn = actionMngOrient, name = "orientation"},
-            -- Priority 3: Execute jobs.
+            -- Priority 4: Execute jobs.
             {fn = actionJobExec, name = "job"},
         }
         for i,action in ipairs(actionSequence) do
-            if fatal_error then
+            if fatal_err then
                 return false
             end
             cur_action = action.name

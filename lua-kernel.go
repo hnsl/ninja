@@ -1,12 +1,12 @@
 package main; var lua_src_kernel = `
-version = 53
+version = 57
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
 
 local orient_block_name = "ExtraUtilities:color_stonebrick"
 
-local refuel_item_name = "minecraft:coal"
+local refuel_item_id = "minecraft:coal/0"
 local refuel_item_fpi = 80
 
 -- Look() return values.
@@ -276,8 +276,8 @@ function tryRefuel(required)
     local cur_slot = first_slot
     while true do
         -- Check if found fuel item in this slot.
-        local detail = turtle.getItemDetail(cur_slot)
-        if detail ~= nil and detail.name == refuel_item_name then
+        local detail = getItemDetail(cur_slot)
+        if detail ~= nil and detail.id == refuel_item_id then
             -- Fuel found, select slot.
             if cur_slot ~= first_slot then
                 local success = turtle.select(cur_slot)
@@ -346,6 +346,18 @@ function upgradeKernel()
     flashKernel(new_kernel)
 end
 
+function getItemDetail(slotNum)
+    local out = turtle.getItemDetail(slotNum)
+    if out == nil then
+        return nil
+    end
+    -- Damage = metadata for blocks. Both damage and metadata must be
+    -- equiviallent for items, otherwise items are considered different
+    -- and cannot ever be stacked.
+    out.id = out.name .. "/" .. tostring(out.damage)
+    return out
+end
+
 -- Returns inventory count.
 function inventoryCount()
     local inv_count = {
@@ -353,12 +365,12 @@ function inventoryCount()
         grouped = {},
     }
     for i = 1, 16 do
-        local detail = turtle.getItemDetail(i)
+        local detail = getItemDetail(i)
         if detail == nil then
             inv_count.free_slots = inv_count.free_slots + 1
         else
-            local count = inv_count.grouped[detail.name] or 0
-            inv_count.grouped[detail.name] = count + detail.count
+            local count = inv_count.grouped[detail.id] or 0
+            inv_count.grouped[detail.id] = count + detail.count
         end
     end
     return inv_count
@@ -369,7 +381,7 @@ end
 -- high: highest position to consider moving to.
 -- defrag: when true defrags inventory by moving remaining to lowest empty.
 function inventoryPack(pos, high, defrag)
-    local dt_from = turtle.getItemDetail(pos)
+    local dt_from = getItemDetail(pos)
     if dt_from == nil then
         return
     end
@@ -385,11 +397,14 @@ function inventoryPack(pos, high, defrag)
             if i == pos then
                 break
             end
-            local dt_to = turtle.getItemDetail(i)
+            local dt_to = getItemDetail(i)
             if dt_to == nil then
                 if low_free == 0 then
                     low_free = i
                 end
+                break
+            end
+            if dt_to.id ~= dt_from.id then
                 break
             end
             local spc = turtle.getItemSpace(i)
@@ -399,7 +414,7 @@ function inventoryPack(pos, high, defrag)
             -- Found slot to move to, transfer.
             turtle.transferTo(i)
             -- Update details at pos and return if completed packing.
-            dt_from = turtle.getItemDetail(pos)
+            dt_from = getItemDetail(pos)
             if dt_from == nil then
                 return
             end
@@ -439,17 +454,17 @@ function executeWorkSuck(work)
     local suck_total = 0
     while true do
         -- Check if specific suck is complete.
-        if instr.item ~= nil and instr.amount <= 0 then
+        if instr.item_id ~= nil and instr.amount <= 0 then
             suck_done = true
             break
         end
         -- Find available occupied slot.
         local dst_slot = 0
         local pre_amount
-        if instr.item ~= nil then
+        if instr.item_id ~= nil then
             for i = 1, 16 do
-                local detail = turtle.getItemDetail(i)
-                if detail ~= nil and detail.name == instr.item then
+                local detail = getItemDetail(i)
+                if detail ~= nil and detail.id == instr.item_id then
                     local spc = turtle.getItemSpace(i)
                     if spc > 0 then
                         dst_slot = i
@@ -486,7 +501,7 @@ function executeWorkSuck(work)
         end
         -- Suck now.
     	local suck_ok
-        if instr.item == nil then
+        if instr.item_id == nil then
             if lret == look_fwd then
                 suck_ok = turtle.suck()
             elseif lret == look_up then
@@ -506,19 +521,19 @@ function executeWorkSuck(work)
         if not suck_ok then
             -- No more items. We are done only if general suck and got more than one item.
             debug("suck: no more items")
-            suck_done = (instr.item == nil and suck_total > 0)
+            suck_done = (instr.item_id == nil and suck_total > 0)
             break
         end
         -- Got at least one item.
         -- Sanity check, count the number of sucked items and adjust amount.
-        local detail = turtle.getItemDetail(dst_slot)
+        local detail = getItemDetail(dst_slot)
         if detail == nil then
             fatalError("inventory error, nil slot #" .. fmt(dst_slot) .. " after successful suck")
             return
         end
-        if instr.item ~= nil and detail.name ~= instr.item then
+        if instr.item_id ~= nil and detail.id ~= instr.item_id then
             fatalError("inventory error, suck produced the wrong item: got: " ..
-                fmt(detail.name) .. ", expected: " .. fmt(instr.item))
+                fmt(detail.id) .. ", expected: " .. fmt(instr.item_id))
             return
         end
         local this_total = detail.count - pre_amount
@@ -527,7 +542,7 @@ function executeWorkSuck(work)
         -- We need to pack after sucking if generic suck.
         -- Packing not required for specific suck since partial stacks are
         -- chosen over free slots.
-        if instr.item == nil then
+        if instr.item_id == nil then
             inventoryPack(dst_slot, 16, false)
         end
     end
@@ -567,26 +582,26 @@ function executeWorkDrop(work)
     -- Clone items to drop.
     debug("dropping1: " .. fmt(instr))
     local new_items = {}
-    for item, amount in pairs(instr.items) do
+    for item_id, amount in pairs(instr.items) do
         if amount ~= nil and amount > 0 then
-            new_items[item] = amount
+            new_items[item_id] = amount
         end
     end
     debug("dropping2: " .. fmt(new_items))
     -- Go through all slots.
     local out_of_space = false
-    local drop_total = 0
+    local n_total_dropped = 0
     for i = 1, 16 do
         for _ = 1, 1 do
-            local detail = turtle.getItemDetail(i)
+            local detail = getItemDetail(i)
             if detail == nil then
                 break
             end
-            local drop_count = new_items[detail.name]
-            if drop_count == nil or drop_count <= 0 then
+            local n_to_drop = new_items[detail.id]
+            if n_to_drop == nil or n_to_drop <= 0 then
                 break
             end
-            debug("dropping " .. fmt(drop_count) ..  " "  .. fmt(detail.name) .. " in slot " .. fmt(i))
+            debug("dropping " .. fmt(n_to_drop) ..  " "  .. fmt(detail.id) .. " in slot " .. fmt(i))
             -- Select destination slot to drop from.
             local select_ok = turtle.select(i)
             if not select_ok then
@@ -594,26 +609,27 @@ function executeWorkDrop(work)
                 return
             end
             -- Drop now.
+            n_drop_here = math.min(n_to_drop, detail.count)
             if lret == look_fwd then
-                turtle.drop(drop_count)
+                turtle.drop(n_drop_here)
             elseif lret == look_up then
-                turtle.dropUp(drop_count)
+                turtle.dropUp(n_drop_here)
             elseif lret == look_down then
-                turtle.dropDown(drop_count)
+                turtle.dropDown(n_drop_here)
             end
             -- Count the number of dropped items.
             local post_count = turtle.getItemCount(i)
             local n_dropped = detail.count - post_count
-            if n_dropped < drop_count then
+            if n_dropped < n_to_drop then
                 -- Container is partially out of space.
                 out_of_space = true
             end
-            drop_total = drop_total + n_dropped
-            local remaining = drop_count - n_dropped
+            n_total_dropped = n_total_dropped + n_dropped
+            local remaining = n_to_drop - n_dropped
             if remaining > 0 then
-                new_items[detail.name] = remaining
+                new_items[detail.id] = remaining
             else
-                new_items[detail.name] = nil
+                new_items[detail.id] = nil
             end
             -- When one item or more remains after dropping we have a partial
             -- stack that must be packed.
@@ -638,7 +654,7 @@ function executeWorkDrop(work)
         -- Not done. All items have not been dropped yet because container
         -- is out of space. Wait for container to free up.
         workError("executeWorkDrop: container is out of space")
-        if drop_total > 0 then
+        if n_total_dropped > 0 then
             work.items = new_items
             saveCurWork()
         end

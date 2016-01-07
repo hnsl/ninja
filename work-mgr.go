@@ -647,7 +647,7 @@ func loadJSON(path string, dst interface{}) {
 	check(err)
 }
 
-var rgx_row = regexp.MustCompile("^row.([0-9]+)$")
+var rgx_row = regexp.MustCompile("^plane.([0-9]+)$")
 
 func loadArea(area_id areaID, area_dir string) {
 	area_parts := strings.Split(string(area_id), ".")

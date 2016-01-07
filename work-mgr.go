@@ -11,18 +11,11 @@ import (
 	"strings"
 )
 
-const (
-	// Special work ID for temporary jobs that don't need to be cancelled
-	// or tracked, e.g. go to coordinate.
-	workIDTmp = -1
-	// Special work ID for low priority jobs that should be cancelable,
-	// e.g. queue indefinitely or wait until something happens.
-	workIDIntr = -2
-)
-
 type areaID string
 type turtleID string
-type itemName string
+
+// An itemID is: item.name + "/" + item.metadata
+type itemID string
 
 type turtle struct {
 	NewKernel      bool `json:"new_kernel"`
@@ -43,14 +36,37 @@ type turtle struct {
 }
 
 type work struct {
-	ID       int
+	ID       workID
 	Type     string
 	Complete bool
 }
 
+type workID int
+
+const (
+	// Special work ID for temporary jobs that don't need to be cancelled
+	// or tracked, e.g. go to coordinate.
+	workIDTmp = workID(-1)
+
+	// Special work IDs for low priority jobs that should be cancelable,
+	// e.g. queue indefinitely or wait until something happens.
+
+	workIDInvImpQueue = workID(-2) // Inventory import queueing.
+	workIDInvImpSuck  = workID(-3) // Inventory import sucking.
+)
+
+func (w workID) isLowPriority() bool {
+	switch w {
+	case workIDInvImpQueue, workIDInvImpSuck:
+		return true
+	default:
+		return false
+	}
+}
+
 type icount struct {
 	FreeSlots int `json:"free_slots"`
-	Grouped   map[itemName]int
+	Grouped   map[itemID]int
 }
 
 type storageArea struct {
@@ -66,10 +82,10 @@ type storageArea struct {
 	LoadOrders map[turtleID]*loadOrder `json:"load_orders"`
 	Boxes      []storageBox            `json:"-"`
 	// map from item ids to number of items to export
-	Exporting map[itemName]int `json:"-"`
+	Exporting map[itemID]int `json:"-"`
 	// map from turtle ids to items and amount to export
 	// an alloc here subtracts the corresponding exporting value
-	ExportAllocs map[turtleID]map[itemName]int `json:"export_allocs"`
+	ExportAllocs map[turtleID]map[itemID]int `json:"export_allocs"`
 }
 
 func (s storageArea) store() {
@@ -161,12 +177,12 @@ func (s storageArea) getBoxOrient(id int) boxOrient {
 }
 
 type boxCandidate struct {
-	dist  int
-	id    int
-	iname itemName
+	dist    int
+	id      int
+	item_id itemID
 }
 
-func (s storageArea) closestBox(pos vec3, iname itemName, drop bool) *boxCandidate {
+func (s storageArea) closestBox(pos vec3, item_id itemID, drop bool) *boxCandidate {
 	var new, used *boxCandidate
 	for id, box := range s.Boxes {
 		if box.Amount < 0 {
@@ -174,12 +190,12 @@ func (s storageArea) closestBox(pos vec3, iname itemName, drop bool) *boxCandida
 		}
 		getCand := func() *boxCandidate {
 			return &boxCandidate{
-				dist:  vec3L1Dist(pos, s.getBoxOrient(id).loadPos()),
-				id:    id,
-				iname: iname,
+				dist:    vec3L1Dist(pos, s.getBoxOrient(id).loadPos()),
+				id:      id,
+				item_id: item_id,
 			}
 		}
-		if (drop && box.Amount == 0) || (!drop && box.Amount >= box.Capacity() && box.Name == iname) {
+		if (drop && box.Amount == 0) || (!drop && box.Amount >= box.Capacity() && box.Name == item_id) {
 			// New box candidate.
 			// TODO: For drop we likely want to record a soft/temporary virtual
 			// selection to avoid contention when dropping multiple resources
@@ -188,7 +204,7 @@ func (s storageArea) closestBox(pos vec3, iname itemName, drop bool) *boxCandida
 			if new == nil || cand.dist < new.dist {
 				new = cand
 			}
-		} else if box.Amount > 0 && box.Amount < box.Capacity() && box.Name == iname {
+		} else if box.Amount > 0 && box.Amount < box.Capacity() && box.Name == item_id {
 			// Used box candidate.
 			cand := getCand()
 			if used == nil || cand.dist < used.dist {
@@ -203,7 +219,7 @@ func (s storageArea) closestBox(pos vec3, iname itemName, drop bool) *boxCandida
 	return new
 }
 
-func (s *storageArea) updateBox(box_id int, iname itemName, delta int) {
+func (s *storageArea) updateBox(box_id int, item_id itemID, delta int) {
 	box := &s.Boxes[box_id]
 	if box.Amount < 0 {
 		panic("attempting to update hole box")
@@ -214,9 +230,9 @@ func (s *storageArea) updateBox(box_id int, iname itemName, delta int) {
 		box.Name = ""
 	} else {
 		if box.Name == "" {
-			box.Name = iname
-		} else if box.Name != iname {
-			panic(fmt.Sprintf("attempting to load %v in %v box", iname, box.Name))
+			box.Name = item_id
+		} else if box.Name != item_id {
+			panic(fmt.Sprintf("attempting to load %v in %v box", item_id, box.Name))
 		}
 	}
 	// Write update plane to json.
@@ -233,11 +249,11 @@ func (s *storageArea) updateBox(box_id int, iname itemName, delta int) {
 const ExportVBoxID = -1
 
 type loadOrder struct {
-	ID    int // work id
-	BoxID int `json:"box_id"` // ExportVBoxID = export drop
+	ID    workID // work id
+	BoxID int    `json:"box_id"` // ExportVBoxID = export drop
 	// items to transfer. only one item type makes sense for suck operations
 	// since items cannot be selectively extrated from containers.
-	Items map[itemName]itemLoadCount
+	Items map[itemID]itemLoadCount
 	Drop  bool // true = drop, false = suck
 }
 
@@ -250,7 +266,7 @@ type itemLoadCount struct {
 
 type storageBox struct {
 	Amount int // -1 = hole, not allocatable
-	Name   itemName
+	Name   itemID
 }
 
 func (s *storageBox) Capacity() int {
@@ -304,10 +320,11 @@ func mgrDecideWork(t turtle) *string {
 }
 
 func mgrDecideStorageWork(t turtle, s *storageArea) *string {
-	if t.CurWork != nil && !t.CurWork.Complete {
-		// Work is not complete yet.
-		// TODO: We likely want to abort import queueing if there is export work to do.
-		// TODO: We could use work ids of -1 to indicate low priority work that can be aborted.
+	// We generally do not assign work when an existing job is not completed,
+	// except for low priority interruptible jobs that should always be
+	// re-evaluated when reported in case another more important job is available.
+	if t.CurWork != nil && !t.CurWork.ID.isLowPriority() && !t.CurWork.Complete {
+		// Non interruptible work is not complete yet.
 		job := ""
 		return &job
 	}
@@ -330,9 +347,9 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 				" does not match current load order: %#v", t.Label, t.CurWork, lo)
 			return nil
 		}
-		for iname, lo_count := range lo.Items {
+		for item_id, lo_count := range lo.Items {
 			// Calculate turtle inventory amount delta.
-			cur_count := t.InvCount.Grouped[iname]
+			cur_count := t.InvCount.Grouped[item_id]
 			n_delta := cur_count - lo_count.PreCount
 			if (n_delta < 0 && !lo.Drop) || (n_delta > 0 && lo.Drop) {
 				log.Printf("storage work error: turtle %v: negative load (%v) %#v", t.Label, n_delta, lo)
@@ -349,7 +366,7 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 					log_bad_export()
 					return nil
 				}
-				item_amount, ok := item_map[iname]
+				item_amount, ok := item_map[item_id]
 				if !ok || -n_delta > item_amount {
 					log_bad_export()
 					return nil
@@ -357,9 +374,9 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 				// Update remaining amount.
 				remaining := item_amount + n_delta
 				if remaining > 0 {
-					item_map[iname] = remaining
+					item_map[item_id] = remaining
 				} else {
-					delete(item_map, iname)
+					delete(item_map, item_id)
 					if len(item_map) == 0 {
 						delete(s.ExportAllocs, t.Label)
 					}
@@ -367,13 +384,15 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 			} else {
 				// Normal box load.
 				box := s.Boxes[lo.BoxID]
-				if box.Amount < n_delta || (box.Name != "" && box.Name != iname) {
+				if box.Amount < n_delta || (box.Name != "" && box.Name != item_id) {
 					log.Printf("storage work error: turtle %v: completed load is incompatible"+
 						" with box: (%v), box: %#v, load order: %#v", t.Label, n_delta, box, lo)
 					return nil
 				}
+				// Box delta is negative turtle delta.
+				box_n_delta := -n_delta
 				// Adjust box content.
-				s.updateBox(lo.BoxID, iname, n_delta)
+				s.updateBox(lo.BoxID, item_id, box_n_delta)
 			}
 		}
 		// Load order complete, remove it.
@@ -397,25 +416,25 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 	//  - 2. When B has more than one item: drop them (export all).
 
 	// Declare A, B and C.
-	inv_a := map[itemName]int{}
-	inv_b := map[itemName]int{}
-	inv_c := map[itemName]int{}
+	inv_a := map[itemID]int{}
+	inv_b := map[itemID]int{}
+	inv_c := map[itemID]int{}
 
 	// Define import and export queue.
 	import_q := s.getImportQ()
 	export_q := s.getExportQ()
 
 	// General handler for A/C cases.
-	tryHandleAC := func(inv_x map[itemName]int, drop bool) *string {
+	tryHandleAC := func(inv_x map[itemID]int, drop bool) *string {
 		if len(inv_x) == 0 {
 			return nil
 		}
 		// Find closest free box to drop for any item we want to drop.
 		var cand *boxCandidate
-		for iname := range inv_x {
-			used := s.closestBox(export_q.origin, iname, true)
+		for item_id := range inv_x {
+			used := s.closestBox(export_q.origin, item_id, true)
 			if used == nil {
-				log.Printf("storage work warning: turtle %v: no free box to unload junk %v", t.Label, iname)
+				log.Printf("storage work warning: turtle %v: no free box to unload junk %v", t.Label, item_id)
 				continue
 			}
 			if cand == nil || used.dist < cand.dist {
@@ -429,18 +448,18 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		// Has a load candidate now.
 		if !drop {
 			// Allocate export of this item to this turtle if have not already.
-			if s.ExportAllocs[t.Label][cand.iname] > 0 {
+			if s.ExportAllocs[t.Label][cand.item_id] > 0 {
 				pending_area_changes = true
-				n_export_me := inv_x[cand.iname]
-				n_export_tot := s.Exporting[cand.iname]
+				n_export_me := inv_x[cand.item_id]
+				n_export_tot := s.Exporting[cand.item_id]
 				// assert(n_export_tot <= n_export_me) - inv_c cannot be defined with larger value
-				s.Exporting[cand.iname] = n_export_tot - n_export_me
+				s.Exporting[cand.item_id] = n_export_tot - n_export_me
 				eallocs := s.ExportAllocs[t.Label]
 				if eallocs == nil {
-					eallocs = map[itemName]int{}
+					eallocs = map[itemID]int{}
 					s.ExportAllocs[t.Label] = eallocs
 				}
-				eallocs[cand.iname] = n_export_me
+				eallocs[cand.item_id] = n_export_me
 			}
 		}
 		// Are we at the box load position?
@@ -452,12 +471,12 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 			pending_area_changes = true
 			s.WorkIDSeq++
 			lo := new(loadOrder)
-			lo.ID = s.WorkIDSeq
+			lo.ID = workID(s.WorkIDSeq)
 			lo.BoxID = cand.id
-			lo.Items = map[itemName]itemLoadCount{
-				cand.iname: itemLoadCount{
-					PreCount: t.InvCount.Grouped[cand.iname],
-					AbsDelta: inv_x[cand.iname],
+			lo.Items = map[itemID]itemLoadCount{
+				cand.item_id: itemLoadCount{
+					PreCount: t.InvCount.Grouped[cand.item_id],
+					AbsDelta: inv_x[cand.item_id],
 				},
 			}
 			lo.Drop = drop
@@ -485,11 +504,11 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 			pending_area_changes = true
 			s.WorkIDSeq++
 			drop_lo := new(loadOrder)
-			drop_lo.ID = s.WorkIDSeq
+			drop_lo.ID = workID(s.WorkIDSeq)
 			drop_lo.BoxID = ExportVBoxID
-			for iname, has_count := range inv_b {
-				drop_lo.Items[iname] = itemLoadCount{
-					PreCount: t.InvCount.Grouped[iname],
+			for item_id, has_count := range inv_b {
+				drop_lo.Items[item_id] = itemLoadCount{
+					PreCount: t.InvCount.Grouped[item_id],
 					AbsDelta: has_count,
 				}
 			}
@@ -499,7 +518,7 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 			return &job
 		} else {
 			// Create queue job. This is a temporary important job and
-			// does not need to be cancelled.
+			// does not need to be interruptible.
 			job := makeQueueOrderJob(workIDTmp, export_q)
 			return &job
 		}
@@ -511,12 +530,21 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		// Are we at the import position?
 		// Both of these jobs are temporary and unimportant. They should be
 		// cancelled if required (e.g. if export is suddenly required).
+		// Since they are constantly re-evaluated we must prevent multiple assignment.
+		// Comparing order equality is trivial since these jobs are static and
+		// only has one nature. Therefore looking at their ID is sufficient.
 		if vec3Equal(t.CurPos, import_q.origin) {
 			// Create generic suck order.
-			return makeJobSuck(workIDTmp, nil, 0, import_q.face_dir)
+			if t.CurWork != nil && t.CurWork.ID == workIDInvImpSuck {
+				return ""
+			}
+			return makeJobSuck(workIDInvImpSuck, nil, 0, import_q.face_dir)
 		} else {
 			// Create queue order.
-			return makeQueueOrderJob(workIDTmp, import_q)
+			if t.CurWork != nil && t.CurWork.ID == workIDInvImpQueue {
+				return ""
+			}
+			return makeQueueOrderJob(workIDInvImpQueue, import_q)
 		}
 	}
 
@@ -526,19 +554,19 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		// Nothing allocated for export, use global export.
 		exporting = s.Exporting
 	}
-	for iname, want_count := range exporting {
-		inv_c[iname] = want_count
+	for item_id, want_count := range exporting {
+		inv_c[item_id] = want_count
 	}
-	for iname, has_count := range t.InvCount.Grouped {
-		inv_a[iname] = has_count
-		exp_count := inv_c[iname]
+	for item_id, has_count := range t.InvCount.Grouped {
+		inv_a[item_id] = has_count
+		exp_count := inv_c[item_id]
 		if exp_count > 0 {
 			if exp_count > has_count {
 				exp_count = has_count
 			}
-			inv_a[iname] -= exp_count
-			inv_b[iname] = exp_count
-			inv_c[iname] -= exp_count
+			inv_a[item_id] -= exp_count
+			inv_b[item_id] = exp_count
+			inv_c[item_id] -= exp_count
 		}
 	}
 
@@ -587,21 +615,21 @@ func makeLoadOrderJob(s storageArea, lo loadOrder) string {
 			box_orient := s.getBoxOrient(lo.BoxID)
 			load_dir = box_orient.loadDir
 		}
-		items := map[itemName]int{}
-		for iname, lo_count := range lo.Items {
-			items[iname] = lo_count.AbsDelta
+		items := map[itemID]int{}
+		for item_id, lo_count := range lo.Items {
+			items[item_id] = lo_count.AbsDelta
 		}
 		return makeJobDrop(lo.ID, items, load_dir)
 	} else {
 		box_orient := s.getBoxOrient(lo.BoxID)
-		for iname, lo_count := range lo.Items {
-			return makeJobSuck(lo.ID, &iname, lo_count.AbsDelta, box_orient.loadDir)
+		for item_id, lo_count := range lo.Items {
+			return makeJobSuck(lo.ID, &item_id, lo_count.AbsDelta, box_orient.loadDir)
 		}
 		panic("expected exactly one item in load order to suck, got zero")
 	}
 }
 
-func makeQueueOrderJob(id int, q qCoords) string {
+func makeQueueOrderJob(id workID, q qCoords) string {
 	return makeJobQueue(id, q.origin, q.q_dir, q.o_q0_dir, q.q0_t0_dir)
 }
 

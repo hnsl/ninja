@@ -19,7 +19,7 @@ var tplJobGo = `new_job = {
 },
 `
 
-func makeJobGo(id int, waypoints []vec3) string {
+func makeJobGo(id workID, waypoints []vec3) string {
     wp_parts := make([]string, len(waypoints))
     for i, wp := range(waypoints) {
         wp_parts[len(waypoints) - i - 1] = luaSerialVec3(wp) + ","
@@ -32,17 +32,17 @@ var tplJobSuck = `new_job = {
     id = %d,
     type = "suck",
     instructions = {
-        item = %s,
+        item_id = %s,
         amount = %d,
         dir = %s,
     },
 },
 `
 
-func makeJobSuck(id int, iname *itemName, amount int, dir vec3) string {
+func makeJobSuck(id workID, item_id *itemID, amount int, dir vec3) string {
     item_srl := "nil"
-    if iname != nil {
-        item_srl = strconv.Quote(string(*iname))
+    if item_id != nil {
+        item_srl = strconv.Quote(string(*item_id))
     }
     dir_srl := luaSerialVec3(dir)
     return fmt.Sprintf(tplJobSuck, id, item_srl, amount, dir_srl)
@@ -58,11 +58,11 @@ var tplJobDrop = `new_job = {
 },
 `
 
-func makeJobDrop(id int, items map[itemName]int, dir vec3) string {
+func makeJobDrop(id workID, items map[itemID]int, dir vec3) string {
     items_parts := make([]string, len(items))
     i := 0
-    for iname, count := range(items) {
-        items_parts[i] = fmt.Sprintf("[%s] = %d,", strconv.Quote(string(iname)), count)
+    for item_id, count := range(items) {
+        items_parts[i] = fmt.Sprintf("[%s] = %d,", strconv.Quote(string(item_id)), count)
         i++
     }
     items_srl := strings.Join(items_parts, "")
@@ -82,7 +82,7 @@ var tplJobQueue = `new_job = {
 },
 `
 
-func makeJobQueue(id int, origin, q_dir, o_q0_dir, q0_t0_dir vec3) string {
+func makeJobQueue(id workID, origin, q_dir, o_q0_dir, q0_t0_dir vec3) string {
     return fmt.Sprintf(tplJobQueue, id,
         luaSerialVec3(origin),
         luaSerialVec3(q_dir),

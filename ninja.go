@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/yuin/gopher-lua"
+	"golang.org/x/net/websocket"
 	"log"
 	"net/http"
 	"os"
@@ -23,6 +24,8 @@ func check(err error) {
 
 func main() {
 	log.SetPrefix("[ninja]")
+	// Start sync.
+	go syncGo()
 	// Read state.
 	if len(os.Args) < 2 {
 		panic("arg 1: expect state directory")
@@ -58,6 +61,7 @@ func goHttpServer() {
 	http.HandleFunc(key+"/kernel", getKernel)
 	http.HandleFunc(key+"/version", getVersion)
 	http.HandleFunc(key+"/report", postReport)
+	http.Handle(key+"/sync", websocket.Handler(wsSync))
 	log.Fatal(http.ListenAndServe(":4456", nil))
 }
 

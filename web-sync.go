@@ -83,11 +83,17 @@ func wsSync(ws *websocket.Conn) {
 				payload.Write([]byte(",\n"))
 			}
 			payload.Write([]byte(strconv.Quote(key)))
-			payload.Write([]byte(" = "))
+			payload.Write([]byte(": "))
 			payload.Write([]byte(value))
 		}
 		payload.Write([]byte("}"))
 		err := websocket.Message.Send(ws, payload.String())
+		if err != nil {
+			return
+		}
+		// Wait for ok to throttle writes.
+		var ok_rsp []byte
+		err = websocket.Message.Receive(ws, &ok_rsp)
 		if err != nil {
 			return
 		}

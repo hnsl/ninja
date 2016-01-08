@@ -1,1 +1,4 @@
 *.jar
+web-root/items
+*.DS_Store
+state

@@ -22,6 +22,8 @@ func check(err error) {
 	}
 }
 
+var web_root_dir string
+
 func main() {
 	log.SetPrefix("[ninja]")
 	// Start sync.
@@ -32,6 +34,10 @@ func main() {
 	}
 	state_dir := os.Args[1]
 	loadState(state_dir)
+	if len(os.Args) < 3 {
+		panic("arg 2: expect web root directory")
+	}
+	web_root_dir = os.Args[2]
 	// Start work manager.
 	go workMgrGo()
 	// Run lua script and get version.
@@ -54,19 +60,26 @@ func main() {
 	goHttpServer()
 }
 
+var root_key = "/72ceda8b"
+
 func goHttpServer() {
 	// Start HTTP server.
-	key := "/72ceda8b"
 	http.HandleFunc("/", indexPage)
-	http.HandleFunc(key+"/kernel", getKernel)
-	http.HandleFunc(key+"/version", getVersion)
-	http.HandleFunc(key+"/report", postReport)
-	http.Handle(key+"/sync", websocket.Handler(wsSync))
+	http.Handle(root_key+"/", http.StripPrefix(root_key+"/", http.FileServer(http.Dir(web_root_dir))))
+	http.HandleFunc(root_key+"/kernel", getKernel)
+	http.HandleFunc(root_key+"/version", getVersion)
+	http.HandleFunc(root_key+"/report", postReport)
+	http.Handle(root_key+"/sync", websocket.Handler(wsSync))
 	log.Fatal(http.ListenAndServe(":4456", nil))
 }
 
 func indexPage(w http.ResponseWriter, r *http.Request) {
-
+	if r.URL.Path != "/" {
+		writeRspNotFound(w)
+		return
+	}
+	// TODO: ?
+	writeRspNotFound(w)
 }
 
 func getKernel(w http.ResponseWriter, r *http.Request) {
@@ -123,6 +136,10 @@ func postReport(w http.ResponseWriter, r *http.Request) {
 	rsp.WriteString("}")
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write(rsp.Bytes())
+}
+
+func writeRspNotFound(w http.ResponseWriter) {
+	http.Error(w, "Not Found", http.StatusNotFound)
 }
 
 func writeRspInternalError(w http.ResponseWriter) {

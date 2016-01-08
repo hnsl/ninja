@@ -633,16 +633,22 @@ func makeQueueOrderJob(id workID, q qCoords) string {
 	return makeJobQueue(id, q.origin, q.q_dir, q.o_q0_dir, q.q0_t0_dir)
 }
 
-func storeJSON(path string, src interface{}) {
-	data, err := json.MarshalIndent(src, "", "\t")
+func pathSyncKey(fs_path string) string {
+	return fmt.Sprintf("%s/%s", path.Base(path.Dir(fs_path)), path.Base(fs_path))
+}
+
+func storeJSON(fs_path string, src interface{}) {
+	raw, err := json.MarshalIndent(src, "", "\t")
 	check(err)
-	err = ioutil.WriteFile(path, data, 0644)
+	syncNotify(pathSyncKey(fs_path), string(raw))
+	err = ioutil.WriteFile(fs_path, raw, 0644)
 	check(err)
 }
 
-func loadJSON(path string, dst interface{}) {
-	raw, err := ioutil.ReadFile(path)
+func loadJSON(fs_path string, dst interface{}) {
+	raw, err := ioutil.ReadFile(fs_path)
 	check(err)
+	syncNotify(pathSyncKey(fs_path), string(raw))
 	err = json.Unmarshal(raw, dst)
 	check(err)
 }

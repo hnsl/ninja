@@ -41,11 +41,6 @@ type work struct {
 	Complete bool
 }
 
-type exportRequest struct {
-	Name  string
-	Count int
-}
-
 type workID int
 
 const (
@@ -87,7 +82,7 @@ type storageArea struct {
 	LoadOrders map[turtleID]*loadOrder `json:"load_orders"`
 	Boxes      []storageBox            `json:"-"`
 	// map from item ids to number of items to export
-	Exporting map[itemID]int `json:"-"`
+	Exporting map[itemID]int
 	// map from turtle ids to items and amount to export
 	// an alloc here subtracts the corresponding exporting value
 	ExportAllocs map[turtleID]map[itemID]int `json:"export_allocs"`
@@ -285,21 +280,61 @@ type workRequest struct {
 	rsp_ch chan *string
 }
 
-var work_ch = make(chan workRequest, 0)
+var work_mgr_ch = make(chan interface{}, 0)
 
 func decideWork(t turtle) *string {
 	req := workRequest{
 		t:      t,
 		rsp_ch: make(chan *string, 1),
 	}
-	work_ch <- req
+	work_mgr_ch <- req
 	return <-req.rsp_ch
+}
+
+type exportRequest struct {
+	ItemID itemID `json:"item_id"`
+	Count  int
+	AreaID areaID    `json:"area_id"`
+	rsp_ch chan bool `json:"-"`
+}
+
+func exportItems(er exportRequest) bool {
+	er.rsp_ch = make(chan bool, 1)
+	work_mgr_ch <- er
+	return <-er.rsp_ch
 }
 
 func workMgrGo() {
 	for {
-		req := <-work_ch
-		req.rsp_ch <- mgrDecideWork(req.t)
+		req := <-work_mgr_ch
+		switch req := req.(type) {
+		case workRequest:
+			req.rsp_ch <- mgrDecideWork(req.t)
+		case exportRequest:
+			req.rsp_ch <- mgrHandleExport(req)
+		}
+	}
+}
+
+func mgrHandleExport(er exportRequest) bool {
+	area := areas[er.AreaID]
+	if area == nil {
+		log.Printf("handle export: error: invalid area id: %v", er.AreaID)
+		return false
+	}
+	switch area := area.(type) {
+	case *storageArea:
+		s := area
+		if er.Count < 0 {
+			return false
+		}
+		// TODO: We likly want to do some more checks here.
+		s.Exporting[er.ItemID] = s.Exporting[er.ItemID] + er.Count
+		s.store()
+		return true
+	default:
+		log.Printf("handle export: error: do not understand area type: %T", area)
+		return false
 	}
 }
 
@@ -453,12 +488,15 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		// Has a load candidate now.
 		if !drop {
 			// Allocate export of this item to this turtle if have not already.
-			if s.ExportAllocs[t.Label][cand.item_id] > 0 {
+			if s.ExportAllocs[t.Label][cand.item_id] == 0 {
 				pending_area_changes = true
 				n_export_me := inv_x[cand.item_id]
 				n_export_tot := s.Exporting[cand.item_id]
 				// assert(n_export_tot <= n_export_me) - inv_c cannot be defined with larger value
 				s.Exporting[cand.item_id] = n_export_tot - n_export_me
+				if s.Exporting[cand.item_id] <= 0 {
+					delete(s.Exporting, cand.item_id)
+				}
 				eallocs := s.ExportAllocs[t.Label]
 				if eallocs == nil {
 					eallocs = map[itemID]int{}
@@ -511,6 +549,7 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 			drop_lo := new(loadOrder)
 			drop_lo.ID = workID(s.WorkIDSeq)
 			drop_lo.BoxID = ExportVBoxID
+			drop_lo.Items = map[itemID]itemLoadCount{}
 			for item_id, has_count := range inv_b {
 				drop_lo.Items[item_id] = itemLoadCount{
 					PreCount: t.InvCount.Grouped[item_id],
@@ -560,7 +599,9 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		exporting = s.Exporting
 	}
 	for item_id, want_count := range exporting {
-		inv_c[item_id] = want_count
+		if want_count > 0 {
+			inv_c[item_id] = want_count
+		}
 	}
 	for item_id, has_count := range t.InvCount.Grouped {
 		inv_a[item_id] = has_count
@@ -572,6 +613,13 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 			inv_a[item_id] -= exp_count
 			inv_b[item_id] = exp_count
 			inv_c[item_id] -= exp_count
+			// Garbage collect A and C.
+			if inv_a[item_id] <= 0 {
+				delete(inv_a, item_id)
+			}
+			if inv_c[item_id] <= 0 {
+				delete(inv_c, item_id)
+			}
 		}
 	}
 
@@ -676,6 +724,12 @@ func loadArea(area_id areaID, area_dir string) {
 		}
 		if s.LoadOrders == nil {
 			s.LoadOrders = map[turtleID]*loadOrder{}
+		}
+		if s.Exporting == nil {
+			s.Exporting = map[itemID]int{}
+		}
+		if s.ExportAllocs == nil {
+			s.ExportAllocs = map[turtleID]map[itemID]int{}
 		}
 		s.Boxes = make([]storageBox, s.nBoxes())
 		files, err := ioutil.ReadDir(area_dir)

@@ -1,5 +1,7 @@
 var state, item_map;
 
+var inv_id = "storage.0";
+
 function pathJoin(parts, sep){
    var separator = sep || '/';
    var replace   = new RegExp(separator+'{1,}', 'g');
@@ -39,7 +41,6 @@ function getItemDisplayName(item_id) {
 
 function refreshInventoryUI() {
     // Recount item totals.
-    var inv_id = "storage.0";
     var details = state[inv_id + "/details"];
     var item_totals = {};
     for (var key in state) {
@@ -78,7 +79,8 @@ function refreshInventoryUI() {
                 id: stack.elem_id,
                 class: "stack",
                 style: "background-image: url('items/icons/" + display_name + ".png');",
-            }).data("stack", stack).html(
+                "data-item_id": stack.item_id,
+            }).html(
                 '<span class="stack-name"></span>'
                 + '<span class="stack-count"></span>'
             ).find(".stack-name").text(display_name);
@@ -113,13 +115,13 @@ function reconnect() {
 
     ws.onerror = function(ev) {
         console.error(ev);
-        setTimeout(function() {
-            reconnect();
-        }, 2000);
     }
 
     ws.onclose = function(ev) {
         console.log(ev)
+        setTimeout(function() {
+            reconnect();
+        }, 2000);
     }
 }
 
@@ -138,7 +140,8 @@ $("#inventory_grid").on("mousedown", "> .stack", function(ev) {
         }
         var stack = $(elem).data("stack");
         $.post("export", JSON.stringify({
-            name: stack.item_id,
+            area_id: inv_id,
+            item_id: $(elem).data("item_id"),
             count: count,
         }), function(ret) {
             console.log("export rsp:", ret);

@@ -150,9 +150,12 @@ func postExport(w http.ResponseWriter, r *http.Request) {
 		log.Printf("decoding export request failed: %v\n", err)
 		return
 	}
-
 	log.Printf("got export request: %v\n", req)
-
+	ret := exportItems(req)
+	raw_rsp, err := json.Marshal(ret)
+	check(err)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(raw_rsp)
 }
 
 func writeRspNotFound(w http.ResponseWriter) {

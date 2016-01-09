@@ -100,6 +100,8 @@ func wsSync(ws *websocket.Conn) {
 		// Wait for update.
 		// TODO: Cancel wait if websocket is killed.
 		last_seq = rsp.seq
+		//websocket.Request
+
 		<-rsp.wchan
 	}
 }

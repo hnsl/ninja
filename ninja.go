@@ -69,6 +69,7 @@ func goHttpServer() {
 	http.HandleFunc(root_key+"/kernel", getKernel)
 	http.HandleFunc(root_key+"/version", getVersion)
 	http.HandleFunc(root_key+"/report", postReport)
+	http.HandleFunc(root_key+"/export", postExport)
 	http.Handle(root_key+"/sync", websocket.Handler(wsSync))
 	log.Fatal(http.ListenAndServe(":4456", nil))
 }
@@ -96,7 +97,6 @@ func postReport(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	_, err := buf.ReadFrom(r.Body)
 	if err != nil {
-		log.Printf("reading report body failed: %v\n", err)
 		return
 	}
 	fmt.Printf("incoming raw report: %v\n", buf.String())
@@ -136,6 +136,23 @@ func postReport(w http.ResponseWriter, r *http.Request) {
 	rsp.WriteString("}")
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write(rsp.Bytes())
+}
+
+func postExport(w http.ResponseWriter, r *http.Request) {
+	var buf bytes.Buffer
+	_, err := buf.ReadFrom(r.Body)
+	if err != nil {
+		return
+	}
+	var req exportRequest
+	err = json.Unmarshal(buf.Bytes(), &req)
+	if err != nil {
+		log.Printf("decoding export request failed: %v\n", err)
+		return
+	}
+
+	log.Printf("got export request: %v\n", req)
+
 }
 
 func writeRspNotFound(w http.ResponseWriter) {

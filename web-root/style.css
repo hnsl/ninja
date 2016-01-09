@@ -1,5 +1,89 @@
+@font-face {
+  font-family: 'Volter';
+  src: url('volter.ttf');
+}
 
-/* style starts here */
 body {
 	background: black;
+	color: white;
+	font-family: 'Volter', 'Verdana', serif;
+}
+
+#wrapper {
+	margin: 10px;
+}
+
+h1 {
+	font-size: 24px;
+	margin-bottom: 5px;
+	color: yellow;
+}
+
+input {
+    background-color: black;
+    border-style: none;
+    color: #fff;
+	font-family: 'Volter', 'Verdana', serif;
+}
+
+.item_grid {
+	margin-bottom: 10px;
+    line-height: 0px;
+}
+
+.item_grid > .stack {
+	width: 48px;
+	height: 48px;
+    padding: 2px;
+    background-size: 50px 50px;
+    display: inline-block;
+	margin: 0px 5px 5px 0px;
+	background-color: #777;
+    text-align: right;
+    line-height: 85px;
+    font-size: 14px;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.item_grid > .stack > .stack-name {
+    display: none;
+    position: fixed;
+    top: 5px;
+    right: 5px;
+    height: 22px;
+    line-height: 22px;
+    font-size: 20px;
+    background-color: #000;
+}
+
+.item_grid > .stack:hover {
+    background-color: #999;
+}
+
+.item_grid > .stack:hover > .stack-name {
+    display: block;
+}
+
+#export_prompt {
+    display: none;
+    position: fixed;
+    top: 40%;
+    left: 0px;
+    right: 0px;
+    bottom: 0px;
+}
+
+#export_prompt > .prompt_window {
+    border: 1px solid #fff;
+    background-color: black;
+    padding: 10px;
+    width: 40%;
+    margin: 0 auto;
+    font-size: 14px;
+}
+
+#export_prompt > .prompt_window > input {
+    width: 30%;
+    font-size: 14px;
 }

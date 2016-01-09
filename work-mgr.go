@@ -41,6 +41,11 @@ type work struct {
 	Complete bool
 }
 
+type exportRequest struct {
+	Name  string
+	Count int
+}
+
 type workID int
 
 const (

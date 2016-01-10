@@ -472,9 +472,9 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		// Find closest free box to drop for any item we want to drop.
 		var cand *boxCandidate
 		for item_id := range inv_x {
-			used := s.closestBox(export_q.origin, item_id, true)
+			used := s.closestBox(t.CurPos, item_id, true)
 			if used == nil {
-				log.Printf("storage work warning: turtle %v: no free box to unload junk %v", t.Label, item_id)
+				log.Printf("storage work warning: turtle %v: no free box to load junk %v", t.Label, item_id)
 				continue
 			}
 			if cand == nil || used.dist < cand.dist {
@@ -593,14 +593,14 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 	}
 
 	// Generate A, B and C.
-	exporting := s.ExportAllocs[t.Label]
-	if len(exporting) == 0 {
-		// Nothing allocated for export, use global export.
-		exporting = s.Exporting
-	}
-	for item_id, want_count := range exporting {
+	for item_id, want_count := range s.ExportAllocs[t.Label] {
 		if want_count > 0 {
 			inv_c[item_id] = want_count
+		}
+	}
+	for item_id, want_count := range s.Exporting {
+		if want_count > 0 {
+			inv_c[item_id] += want_count
 		}
 	}
 	for item_id, has_count := range t.InvCount.Grouped {

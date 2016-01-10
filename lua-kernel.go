@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 57
+version = 58
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -510,12 +510,13 @@ function executeWorkSuck(work)
                 suck_ok = turtle.suckDown()
             end
         else
+            n_suck_here = math.min(instr.amount, 64)
             if lret == look_fwd then
-                suck_ok = turtle.suck(instr.amount)
+                suck_ok = turtle.suck(n_suck_here)
             elseif lret == look_up then
-                suck_ok = turtle.suckUp(instr.amount)
+                suck_ok = turtle.suckUp(n_suck_here)
             elseif lret == look_down then
-                suck_ok = turtle.suckDown(instr.amount)
+                suck_ok = turtle.suckDown(n_suck_here)
             end
         end
         if not suck_ok then

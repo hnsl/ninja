@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 )
 
@@ -26,6 +27,8 @@ var web_root_dir string
 
 func main() {
 	log.SetPrefix("[ninja]")
+	term_ch := make(chan os.Signal, 1)
+	signal.Notify(term_ch, os.Interrupt, os.Kill)
 	// Start sync.
 	go syncGo()
 	// Read state.
@@ -57,7 +60,12 @@ func main() {
 	log.Printf("kernel version %v ready\n", kern_version)
 	log.Printf("starting http server\n")
 	// Start HTTP server.
-	goHttpServer()
+	go goHttpServer()
+	// Wait for termination and exit gracefully.
+	<-term_ch
+	log.Printf("got term, exiting\n")
+	workMgrExit()
+	os.Exit(0)
 }
 
 var root_key = "/72ceda8b"

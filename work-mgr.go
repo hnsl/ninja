@@ -304,6 +304,14 @@ func exportItems(er exportRequest) bool {
 	return <-er.rsp_ch
 }
 
+type exitRequest struct{}
+
+func workMgrExit() {
+	// Because channel has size 0 this blocks until exit request is received
+	// and it's safe to return from function.
+	work_mgr_ch <- exitRequest{}
+}
+
 func workMgrGo() {
 	for {
 		req := <-work_mgr_ch
@@ -312,6 +320,8 @@ func workMgrGo() {
 			req.rsp_ch <- mgrDecideWork(req.t)
 		case exportRequest:
 			req.rsp_ch <- mgrHandleExport(req)
+		case exitRequest:
+			return
 		}
 	}
 }

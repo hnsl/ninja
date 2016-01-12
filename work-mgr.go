@@ -455,6 +455,7 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 	}
 
 	// Find new job.
+	// The highest priority is always to refuel when out of fuel.
 	// First we need to divide our theoretical inventory into the subsets:
 	// A = {inventory we have and don't want to export}
 	// B = {inventory we have and want to export}
@@ -476,6 +477,72 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 	// Define import and export queue.
 	import_q := s.getImportQ()
 	export_q := s.getExportQ()
+
+	// Create a box load job.
+	boxLoadJob := func(cand *boxCandidate, drop bool, abs_delta int) *string {
+		// Are we at the box load position?
+		box_orient := s.getBoxOrient(cand.id)
+		box_load_pos := box_orient.loadPos()
+		// fmt.Printf("box %#v %#v %v %v\n", cand, box_orient, box_load_pos, drop)
+		if vec3Equal(t.CurPos, box_load_pos) {
+			// Create load order job.
+			pending_area_changes = true
+			s.WorkIDSeq++
+			lo := new(loadOrder)
+			lo.ID = workID(s.WorkIDSeq)
+			lo.BoxID = cand.id
+			box_amount := s.Boxes[cand.id].Amount
+			if !drop && abs_delta > box_amount {
+				// Cannot suck more than what's in the box.
+				abs_delta = box_amount
+			}
+			lo.Items = map[itemID]itemLoadCount{
+				cand.item_id: itemLoadCount{
+					PreCount: t.InvCount.Grouped[cand.item_id],
+					AbsDelta: abs_delta,
+				},
+			}
+			lo.Drop = drop
+			s.LoadOrders[t.Label] = lo
+			job := makeLoadOrderJob(*s, *lo)
+			return &job
+		} else {
+			// Create go job.
+			job := makeJobGo(workIDTmp, []vec3{box_load_pos})
+			return &job
+		}
+	}
+
+	// Handler for refueling.
+	tryRefuel := func() *string {
+		if t.FuelLvl > 500 {
+			return nil
+		}
+		// When we have refuel item in inventory we use them.
+		item_id := itemID("minecraft:coal/0")
+		fuel_per_item := 80
+		fuel_to_lvl := 5000
+		n_has := t.InvCount.Grouped[item_id]
+		// Note: Assuming one stack of fuel.
+		if n_has == 0 && t.InvCount.FreeSlots == 0 {
+			return nil
+		}
+		n_need := fuel_to_lvl / fuel_per_item
+		if n_has < n_need {
+			// Find closest box to pick up fuel.
+			cand := s.closestBox(t.CurPos, item_id, false)
+			if cand != nil {
+				return boxLoadJob(cand, false, n_need-n_has)
+			}
+			log.Printf("storage work warning: turtle %v: no available fuel in inventory", t.Label)
+			if n_has == 0 {
+				return nil
+			}
+			n_need = n_has
+		}
+		job := makeJobRefuel(workIDTmp, item_id, n_need)
+		return &job
+	}
 
 	// General handler for A/C cases.
 	tryHandleAC := func(inv_x map[itemID]int, drop bool) *string {
@@ -528,37 +595,7 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 				eallocs[cand.item_id] = n_export_me
 			}
 		}
-		// Are we at the box load position?
-		box_orient := s.getBoxOrient(cand.id)
-		box_load_pos := box_orient.loadPos()
-		fmt.Printf("box %#v %#v %v %v\n", cand, box_orient, box_load_pos, drop)
-		if vec3Equal(t.CurPos, box_load_pos) {
-			// Create load order job.
-			pending_area_changes = true
-			s.WorkIDSeq++
-			lo := new(loadOrder)
-			lo.ID = workID(s.WorkIDSeq)
-			lo.BoxID = cand.id
-			abs_delta := inv_x[cand.item_id]
-			if !drop && abs_delta > box_amount {
-				// Cannot suck more than what's in the box.
-				abs_delta = box_amount
-			}
-			lo.Items = map[itemID]itemLoadCount{
-				cand.item_id: itemLoadCount{
-					PreCount: t.InvCount.Grouped[cand.item_id],
-					AbsDelta: abs_delta,
-				},
-			}
-			lo.Drop = drop
-			s.LoadOrders[t.Label] = lo
-			job := makeLoadOrderJob(*s, *lo)
-			return &job
-		} else {
-			// Create go job.
-			job := makeJobGo(workIDTmp, []vec3{box_load_pos})
-			return &job
-		}
+		return boxLoadJob(cand, drop, inv_x[cand.item_id])
 	}
 
 	// Handlers for all cases.
@@ -654,7 +691,7 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 	// Work priority is based on free slots.
 	var job *string
 	if t.InvCount.FreeSlots > 0 {
-		for _, fn := range []func() *string{tryHandleC, tryHandleB, tryHandleA} {
+		for _, fn := range []func() *string{tryRefuel, tryHandleC, tryHandleB, tryHandleA} {
 			job = fn()
 			if job != nil {
 				break
@@ -665,7 +702,7 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 			job = &import_job
 		}
 	} else {
-		for _, fn := range []func() *string{tryHandleA, tryHandleB} {
+		for _, fn := range []func() *string{tryRefuel, tryHandleA, tryHandleB} {
 			job = fn()
 			if job != nil {
 				break

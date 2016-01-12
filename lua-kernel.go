@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 58
+version = 60
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -426,6 +426,15 @@ function inventoryPack(pos, high, defrag)
     end
 end
 
+-- For slowing down operation slightly and communicating often.
+-- Common for low priority waits that can be interrupted.
+function lowPrioWait()
+    if timeSinceReport() > 6 then
+        trigger_report()
+    end
+    os.sleep(2)
+end
+
 function executeWorkGo(work)
     local wp_stack = work.instructions.waypoint_stack
     if #wp_stack == 0 then
@@ -567,7 +576,7 @@ function executeWorkSuck(work)
         if suck_total > 0 then
             saveCurWork()
         end
-        os.sleep(2)
+        lowPrioWait()
     end
 end
 
@@ -659,19 +668,45 @@ function executeWorkDrop(work)
             work.items = new_items
             saveCurWork()
         end
-        os.sleep(2)
+        lowPrioWait()
     end
 end
 
-function executeWorkQueue(work)
-    local non_aggr_low_prio_wait = (function()
-        -- Wait in queue non-agressively. Report often since waiting in
-        -- queue is likely low priority work.
-        if timeSinceReport() > 6 then
-            trigger_report()
+function executeWorkRefuel(work)
+    local instr = work.instructions
+    local remaining = instr.count
+    for i = 1, 16 do
+        if remaining <= 0 then
+            break
         end
-        os.sleep(2)
-    end)
+        -- Check if found fuel item in this slot.
+        local detail = getItemDetail(i)
+        if detail ~= nil and detail.id == instr.item then
+            -- Fuel found, select slot.
+            local success = turtle.select(i)
+            if not success then
+                workError("executeWorkRefuel: selecting slot " .. fmt(i) .. " failed")
+                return
+            end
+            -- Refuel the amount we want.
+            local n_refuel = detail.count
+            if n_refuel > remaining then
+                n_refuel = remaining
+            end
+            local success = turtle.refuel(n_refuel)
+            if not success then
+                workError("executeWorkRefuel: refuel() failed")
+                return
+            end
+            remaining = remaining - n_refuel
+        end
+    end
+    -- Job complete.
+    work.complete = true
+    saveCurWork()
+end
+
+function executeWorkQueue(work)
     local instr = work.instructions
     if instr.state == nil then
         -- First attempt to reach queue t0.
@@ -697,7 +732,7 @@ function executeWorkQueue(work)
             local tfwd_ok = move(vec3_inv_dir(instr.q_dir))
             if not tfwd_ok then
                 debug("stuck in queue t lane (reached end?)")
-                non_aggr_low_prio_wait()
+                lowPrioWait()
                 return
             end
         end
@@ -717,7 +752,7 @@ function executeWorkQueue(work)
             local qfwd_ok = move(instr.q_dir)
             if not qfwd_ok then
                 debug("waiting in queue q lane")
-                non_aggr_low_prio_wait()
+                lowPrioWait()
                 return
             end
         end
@@ -730,7 +765,7 @@ function executeWorkQueue(work)
             saveCurWork()
             return
         else
-            non_aggr_low_prio_wait()
+            lowPrioWait()
             return
         end
     else
@@ -745,6 +780,8 @@ function executeWork(work)
         executeWorkSuck(work)
     elseif work.type == "drop" then
         executeWorkDrop(work)
+    elseif work.type == "refuel" then
+        executeWorkRefuel(work)
     elseif work.type == "queue" then
         executeWorkQueue(work)
     else
@@ -783,8 +820,10 @@ end
     local work_err = nil
     local last_report_time = 0
 
-    local refuel_min = 100
-    local refuel_max = 32 * 80
+    -- Autonomous refueling refuels as little as possible
+    -- as it's only used as a last resort.
+    local refuel_min = 1
+    local refuel_max = 100
 
     function fatalError(err)
         local full_err = "fatal error: " .. fmt(err)

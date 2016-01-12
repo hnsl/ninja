@@ -70,6 +70,20 @@ func makeJobDrop(id workID, items map[itemID]int, dir vec3) string {
     return fmt.Sprintf(tplJobDrop, id, items_srl, dir_srl)
 }
 
+var tplJobRefuel = `new_job = {
+    id = %d,
+    type = "refuel",
+    instructions = {
+        item = %s,
+        count = %d
+    },
+},`
+
+func makeJobRefuel(id workID, item_id itemID, count int) string {
+    item_srl := strconv.Quote(string(item_id))
+    return fmt.Sprintf(tplJobRefuel, id, item_srl, count)
+}
+
 var tplJobQueue = `new_job = {
     id = %d,
     type = "queue",

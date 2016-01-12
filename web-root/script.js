@@ -19,10 +19,10 @@ function nPerPlane(details) {
     return details.XLen * 2 + details.YLen * 2;
 }
 
-function sortInventoryTotals(item_totals) {
+function sortItemStacks(stacks) {
     var totals = [];
-    for (var item_id in item_totals) {
-        totals.push({item_id: item_id, count: item_totals[item_id]});
+    for (var item_id in stacks) {
+        totals.push({item_id: item_id, count: stacks[item_id]});
     }
     totals.sort(function(a, b) {
         return a.count < b.count? 1: (a.count > b.count? -1:
@@ -42,7 +42,8 @@ function getItemDisplayName(item_id) {
 function refreshInventoryUI() {
     // Recount item totals.
     var details = state[inv_id + "/details"];
-    var item_totals = {};
+    var inventory_totals = {};
+    var export_totals = {};
     for (var key in state) {
         var match = key.match(/^(storage\.\d+)\/plane\.(\d+)$/);
         if (!match || match[1] !== inv_id) {
@@ -54,45 +55,69 @@ function refreshInventoryUI() {
         for (var i = 0; i < plane.length; i++) {
             var slot = plane[i];
             if (slot.Amount > 0) {
-                if (!item_totals[slot.Name]) {
-                    item_totals[slot.Name] = 0;
+                if (!inventory_totals[slot.Name]) {
+                    inventory_totals[slot.Name] = 0;
                 }
-                item_totals[slot.Name] += slot.Amount;
+                inventory_totals[slot.Name] += slot.Amount;
             }
         }
     }
-    var sorted_totals = sortInventoryTotals(item_totals);
-    for (var i = 0; i < sorted_totals.length; i++) {
-        var stack = sorted_totals[i];
-        stack.elem_id = "inv_stack_" + stack.item_id;
-        stack.elem = document.getElementById(stack.elem_id);
-    }
-    var igrid = $("#inventory_grid");
-    $(igrid).empty();
-    for (var i = 0; i < sorted_totals.length; i++) {
-        var stack = sorted_totals[i];
-        var elem = stack.elem;
-        if (!elem) {
-            elem = document.createElement("div");
-            var display_name = getItemDisplayName(stack.item_id);
-            $(elem).attr({
-                id: stack.elem_id,
-                class: "stack",
-                style: "background-image: url('items/icons/" + display_name + ".png');",
-                "data-item_id": stack.item_id,
-            }).html(
-                '<span class="stack-name"></span>'
-                + '<span class="stack-count"></span>'
-            ).find(".stack-name").text(display_name);
+    for (var item_id in details.Exporting) {
+        var amount = details.Exporting[item_id];
+        if (!export_totals[item_id]) {
+            export_totals[item_id] = 0;
         }
-        $(elem).find(".stack-count").text(stack.count);
-        $(igrid).append(elem);
+        export_totals[item_id] += amount;
     }
+    for (var turtle_id in details.export_allocs) {
+        var turtle_allocs = details.export_allocs[turtle_id];
+        for (var item_id in turtle_allocs) {
+            var amount = turtle_allocs[item_id];
+            if (!export_totals[item_id]) {
+                export_totals[item_id] = 0;
+            }
+            export_totals[item_id] += amount;
+        }
+    }
+    var sorted_inventory = sortItemStacks(inventory_totals);
+    var sorted_exports = sortItemStacks(export_totals);
+    var stack_element_map_fn = function(id_prefix, sorted_stacks) {
+        for (var i = 0; i < sorted_stacks.length; i++) {
+            var stack = sorted_stacks[i];
+            stack.elem_id = id_prefix + stack.item_id;
+            stack.elem = document.getElementById(stack.elem_id);
+        }
+    }
+    stack_element_map_fn("inv_stack_", sorted_inventory);
+    stack_element_map_fn("exp_stack_", sorted_exports);
+    var populate_grid_fn = function(grid, sorted_stacks) {
+        $(grid).empty();
+        for (var i = 0; i < sorted_stacks.length; i++) {
+            var stack = sorted_stacks[i];
+            var elem = stack.elem;
+            if (!elem) {
+                elem = document.createElement("div");
+                var display_name = getItemDisplayName(stack.item_id);
+                $(elem).attr({
+                    id: stack.elem_id,
+                    class: "stack",
+                    style: "background-image: url('items/icons/" + display_name + ".png');",
+                    "data-item_id": stack.item_id,
+                }).html(
+                    '<span class="stack-name"></span>'
+                    + '<span class="stack-count"></span>'
+                ).find(".stack-name").text(display_name);
+            }
+            $(elem).find(".stack-count").text(stack.count);
+            $(grid).append(elem);
+        }
+    };
+    populate_grid_fn($("#inventory_grid"), sorted_inventory);
+    populate_grid_fn($("#exports_grid"), sorted_exports);
 }
 
 function refreshUI() {
-    refreshInventoryUI()
-
+    refreshInventoryUI();
 }
 
 function reconnect() {

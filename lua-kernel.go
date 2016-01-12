@@ -238,6 +238,10 @@ function orientate()
             pos = {50, 118, 827},
             rot = {-1, 0, 0},
         },
+        ["10.2"] = {
+            pos = {83, 69, 806},
+            rot = {0, 0, 1},
+        },
     }
     local down_ok, det_down = turtle.inspectDown()
     if not down_ok then

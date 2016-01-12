@@ -328,7 +328,8 @@ func mgrHandleExport(er exportRequest) bool {
 		if er.Count < 0 {
 			return false
 		}
-		// TODO: We likly want to do some more checks here.
+		// TODO: We want to prevent more items from beeing exported here than
+		// what is actually available.
 		s.Exporting[er.ItemID] = s.Exporting[er.ItemID] + er.Count
 		s.store()
 		return true
@@ -396,29 +397,33 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 				return nil
 			}
 			if lo.BoxID == ExportVBoxID {
-				// Export, assert(lo.Drop).
-				log_bad_export := func() {
-					log.Printf("storage work error: turtle %v: bad export %#v"+
-						", incompatible with %v", t.Label, lo, s.ExportAllocs)
-				}
-				item_map, ok := s.ExportAllocs[t.Label]
-				if !ok {
-					log_bad_export()
-					return nil
-				}
-				item_amount, ok := item_map[item_id]
-				if !ok || -n_delta > item_amount {
-					log_bad_export()
-					return nil
-				}
-				// Update remaining amount.
-				remaining := item_amount + n_delta
-				if remaining > 0 {
-					item_map[item_id] = remaining
-				} else {
-					delete(item_map, item_id)
-					if len(item_map) == 0 {
-						delete(s.ExportAllocs, t.Label)
+				// Update export allocation.
+				n_unaccounted := (func() int {
+					item_map := s.ExportAllocs[t.Label]
+					if item_map == nil {
+						return -n_delta
+					}
+					item_amount := item_map[item_id]
+					// Update remaining amount.
+					remaining := item_amount + n_delta
+					if remaining > 0 {
+						item_map[item_id] = remaining
+					} else {
+						delete(item_map, item_id)
+						if len(item_map) == 0 {
+							delete(s.ExportAllocs, t.Label)
+						}
+					}
+					return -remaining
+				})()
+				// Unaccounted exported items subtract the global export counter directly.
+				// This happens when items to export are import loaded and therefore not allocated.
+				if n_unaccounted > 0 {
+					if _, ok := s.Exporting[item_id]; ok {
+						s.Exporting[item_id] -= n_unaccounted
+						if s.Exporting[item_id] <= 0 {
+							delete(s.Exporting, item_id)
+						}
 					}
 				}
 			} else {
@@ -472,9 +477,13 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		// Find closest free box to drop for any item we want to drop.
 		var cand *boxCandidate
 		for item_id := range inv_x {
-			used := s.closestBox(t.CurPos, item_id, true)
+			used := s.closestBox(t.CurPos, item_id, drop)
 			if used == nil {
-				log.Printf("storage work warning: turtle %v: no free box to load junk %v", t.Label, item_id)
+				if drop {
+					log.Printf("storage work warning: turtle %v: no free box to load junk %v", t.Label, item_id)
+				} else {
+					log.Printf("storage work warning: turtle %v: out of item %v, nothing to export", t.Label, item_id)
+				}
 				continue
 			}
 			if cand == nil || used.dist < cand.dist {
@@ -486,11 +495,17 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		}
 		// fmt.Printf("load candidate: %#v\n", cand)
 		// Has a load candidate now.
+		box_amount := s.Boxes[cand.id].Amount
 		if !drop {
 			// Allocate export of this item to this turtle if have not already.
 			if s.ExportAllocs[t.Label][cand.item_id] == 0 {
 				pending_area_changes = true
 				n_export_me := inv_x[cand.item_id]
+				if n_export_me > box_amount {
+					// We do not export allocate more than what's in the target candidate box.
+					// This allows parallel export of large quantities.
+					n_export_me = box_amount
+				}
 				n_export_tot := s.Exporting[cand.item_id]
 				// assert(n_export_tot <= n_export_me) - inv_c cannot be defined with larger value
 				s.Exporting[cand.item_id] = n_export_tot - n_export_me
@@ -516,10 +531,15 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 			lo := new(loadOrder)
 			lo.ID = workID(s.WorkIDSeq)
 			lo.BoxID = cand.id
+			abs_delta := inv_x[cand.item_id]
+			if !drop && abs_delta > box_amount {
+				// Cannot suck more than what's in the box.
+				abs_delta = box_amount
+			}
 			lo.Items = map[itemID]itemLoadCount{
 				cand.item_id: itemLoadCount{
 					PreCount: t.InvCount.Grouped[cand.item_id],
-					AbsDelta: inv_x[cand.item_id],
+					AbsDelta: abs_delta,
 				},
 			}
 			lo.Drop = drop
@@ -599,8 +619,8 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		}
 	}
 	for item_id, want_count := range s.Exporting {
-		if want_count > 0 {
-			inv_c[item_id] += want_count
+		if want_count > 0 && inv_c[item_id] == 0 {
+			inv_c[item_id] = want_count
 		}
 	}
 	for item_id, has_count := range t.InvCount.Grouped {

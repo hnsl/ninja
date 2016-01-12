@@ -657,6 +657,14 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		}
 	}
 
+	// Some items are blacklisted and should be immediately exported
+	// because we can distinguish different items that can't be stacked.
+	// This is caused by mods not using damage/metadata properly.
+	item_blacklist := map[itemID]bool{
+		itemID("Thaumcraft:ItemWispEssence/0"): true,
+		itemID("Thaumcraft:ItemManaBean/0"):    true,
+	}
+
 	// Generate A, B and C.
 	for item_id, want_count := range s.ExportAllocs[t.Label] {
 		if want_count > 0 {
@@ -671,6 +679,9 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 	for item_id, has_count := range t.InvCount.Grouped {
 		inv_a[item_id] = has_count
 		exp_count := inv_c[item_id]
+		if item_blacklist[item_id] && exp_count < has_count {
+			exp_count = has_count
+		}
 		if exp_count > 0 {
 			if exp_count > has_count {
 				exp_count = has_count

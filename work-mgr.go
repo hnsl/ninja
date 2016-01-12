@@ -325,12 +325,10 @@ func mgrHandleExport(er exportRequest) bool {
 	switch area := area.(type) {
 	case *storageArea:
 		s := area
-		if er.Count < 0 {
-			return false
-		}
-		// TODO: We want to prevent more items from beeing exported here than
-		// what is actually available.
 		s.Exporting[er.ItemID] = s.Exporting[er.ItemID] + er.Count
+		if s.Exporting[er.ItemID] <= 0 {
+			delete(s.Exporting, er.ItemID)
+		}
 		s.store()
 		return true
 	default:

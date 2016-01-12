@@ -65,7 +65,7 @@ input {
     display: block;
 }
 
-#export_prompt {
+#amount_prompt {
     display: none;
     position: fixed;
     top: 40%;
@@ -74,7 +74,7 @@ input {
     bottom: 0px;
 }
 
-#export_prompt > .prompt_window {
+#amount_prompt > .prompt_window {
     border: 1px solid #fff;
     background-color: black;
     padding: 10px;
@@ -83,7 +83,7 @@ input {
     font-size: 14px;
 }
 
-#export_prompt > .prompt_window > input {
+#amount_prompt > .prompt_window > input {
     width: 30%;
     font-size: 14px;
 }

@@ -43,7 +43,8 @@ function refreshInventoryUI() {
     // Recount item totals.
     var details = state[inv_id + "/details"];
     var inventory_totals = {};
-    var export_totals = {};
+    var exports_totals = {};
+    var exporting_totals = {};
     for (var key in state) {
         var match = key.match(/^(storage\.\d+)\/plane\.(\d+)$/);
         if (!match || match[1] !== inv_id) {
@@ -64,23 +65,24 @@ function refreshInventoryUI() {
     }
     for (var item_id in details.Exporting) {
         var amount = details.Exporting[item_id];
-        if (!export_totals[item_id]) {
-            export_totals[item_id] = 0;
+        if (!exports_totals[item_id]) {
+            exports_totals[item_id] = 0;
         }
-        export_totals[item_id] += amount;
+        exports_totals[item_id] += amount;
     }
     for (var turtle_id in details.export_allocs) {
         var turtle_allocs = details.export_allocs[turtle_id];
         for (var item_id in turtle_allocs) {
             var amount = turtle_allocs[item_id];
-            if (!export_totals[item_id]) {
-                export_totals[item_id] = 0;
+            if (!exporting_totals[item_id]) {
+                exporting_totals[item_id] = 0;
             }
-            export_totals[item_id] += amount;
+            exporting_totals[item_id] += amount;
         }
     }
     var sorted_inventory = sortItemStacks(inventory_totals);
-    var sorted_exports = sortItemStacks(export_totals);
+    var sorted_exports = sortItemStacks(exports_totals);
+    var sorted_exporting = sortItemStacks(exporting_totals);
     var stack_element_map_fn = function(id_prefix, sorted_stacks) {
         for (var i = 0; i < sorted_stacks.length; i++) {
             var stack = sorted_stacks[i];
@@ -89,7 +91,8 @@ function refreshInventoryUI() {
         }
     }
     stack_element_map_fn("inv_stack_", sorted_inventory);
-    stack_element_map_fn("exp_stack_", sorted_exports);
+    stack_element_map_fn("exp1_stack_", sorted_exports);
+    stack_element_map_fn("exp2_stack_", sorted_exporting);
     var populate_grid_fn = function(grid, sorted_stacks) {
         $(grid).empty();
         for (var i = 0; i < sorted_stacks.length; i++) {
@@ -114,6 +117,7 @@ function refreshInventoryUI() {
     };
     populate_grid_fn($("#inventory_grid"), sorted_inventory);
     populate_grid_fn($("#exports_grid"), sorted_exports);
+    populate_grid_fn($("#exporting_grid"), sorted_exporting);
 }
 
 function refreshUI() {
@@ -156,14 +160,16 @@ $.get("items/item-map.json", function(data) {
     reconnect();
 });
 
-$("#inventory_grid").on("mousedown", "> .stack", function(ev) {
+$("#inventory_grid, #exports_grid").on("mousedown", "> .stack", function(ev) {
     ev.preventDefault();
     var elem = ev.currentTarget;
     var export_now_fn = function(count) {
-        if (!count || isNaN(count) || count < 0 || count > 1e6) {
+        if (!count || isNaN(count) || count < -1e6 || count > 1e6) {
             return;
         }
-        var stack = $(elem).data("stack");
+        if ($(elem).parents("#exports_grid").length > 0) {
+            count = -count;
+        }
         $.post("export", JSON.stringify({
             area_id: inv_id,
             item_id: $(elem).data("item_id"),
@@ -174,10 +180,10 @@ $("#inventory_grid").on("mousedown", "> .stack", function(ev) {
     };
     if (ev.ctrlKey || ev.metaKey) {
         $("#export_count").data("submit", false).val("");
-        $("#export_prompt").show();
+        $("#amount_prompt").show();
         $("#export_count").focus().one("blur", function(ev) {
             var submit = $(this).data("submit");
-            $("#export_prompt").hide();
+            $("#amount_prompt").hide();
             if (submit) {
                 var count = parseInt($(this).val(), 10);
                 export_now_fn(count);

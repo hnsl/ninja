@@ -10,6 +10,19 @@ func luaSerialVec3(v vec3) string {
     return fmt.Sprintf("{%d, %d, %d}", v[0], v[1], v[2])
 }
 
+var tplJobIdle = `new_job = {
+    id = %d,
+    type = "idle",
+    instructions = {
+        time = %d,
+    },
+},
+`
+
+func makeJobIdle(id workID, seconds int) string {
+    return fmt.Sprintf(tplJobIdle, id, seconds)
+}
+
 var tplJobGo = `new_job = {
     id = %d,
     type = "go",
@@ -103,4 +116,50 @@ func makeJobQueue(id workID, origin, q_dir, o_q0_dir, q0_t0_dir vec3) string {
         luaSerialVec3(o_q0_dir),
         luaSerialVec3(q0_t0_dir),
     )
+}
+
+var tplJobMine = `new_job = {
+    id = %d,
+    type = "mine",
+    instructions = {
+        waypoint_stack = {%s},
+        dynamic = %t,
+    },
+},`
+
+// Creates a mine job.
+// A static mine job means just drill forward to the next waypoint.
+// A dynamic mine job means to also look around for intresting blocks that will
+// be selectively mined.
+func makeJobMine(id workID, waypoints []vec3, dynamic bool) string {
+    wp_parts := make([]string, len(waypoints))
+    for i, wp := range(waypoints) {
+        wp_parts[len(waypoints) - i - 1] = luaSerialVec3(wp) + ","
+    }
+    wp_srl := strings.Join(wp_parts, "")
+    return fmt.Sprintf(tplJobMine, id, wp_srl, dynamic)
+}
+
+var tplJobConstruct = `new_job = {
+    id = %d,
+    type = "construct",
+    instructions = {
+        item = %s,
+        waypoint_stack = {%s},
+        dir = %s,
+    },
+},`
+
+// Creates a construct job.
+// Before starting and after each step taken the specified item will be placed
+// in the specified direction while walking towards dir.
+func makeJobConstruct(id workID, item_id itemID, waypoints []vec3, dir vec3) string {
+    item_srl := strconv.Quote(string(item_id))
+    wp_parts := make([]string, len(waypoints))
+    for i, wp := range(waypoints) {
+        wp_parts[len(waypoints) - i - 1] = luaSerialVec3(wp) + ","
+    }
+    wp_srl := strings.Join(wp_parts, "")
+    dir_srl := luaSerialVec3(dir)
+    return fmt.Sprintf(tplJobMine, id, item_srl, wp_srl, dir_srl)
 }

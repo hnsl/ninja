@@ -216,7 +216,7 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 	// Have we completed a box load that we should account for?
 	if lo_ptr := s.LoadOrders[t.Label]; lo_ptr != nil {
 		lo := *lo_ptr
-		if t.CurWork == nil || (t.CurWork.ID != lo.ID && t.CurWork.Complete) {
+		if t.CurWork == nil || t.CurWork.ID != lo.ID {
 			// Turtle did not get assigned work? Reassign load order.
 			log.Printf("storage work warning: turtle %v: current load order work: %#v,"+
 				" was unexpectedly not assigned", t.Label, lo)

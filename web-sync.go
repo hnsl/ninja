@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"github.com/google/btree"
 	"golang.org/x/net/websocket"
+	"log"
 	"strconv"
 )
 
@@ -75,6 +76,21 @@ func syncGo() {
 }
 
 func wsSync(ws *websocket.Conn) {
+	log.Printf("sync: started")
+	// Start go routine that reads ok's.
+	ws_ok_ch := make(chan struct{}, 1)
+	go func() {
+		defer close(ws_ok_ch)
+		for {
+			var ok_rsp []byte
+			err := websocket.Message.Receive(ws, &ok_rsp)
+			if err != nil || !bytes.Equal(ok_rsp, []byte("ok")) {
+				log.Printf("sync: ended %v", err)
+				return
+			}
+			ws_ok_ch <- struct{}{}
+		}
+	}()
 	last_seq := int64(0)
 	for {
 		req := syncRefreshReq{last_seq: last_seq, rsp_ch: make(chan syncRefreshRsp, 1)}
@@ -100,17 +116,20 @@ func wsSync(ws *websocket.Conn) {
 			return
 		}
 		// Wait for ok to throttle writes.
-		var ok_rsp []byte
-		err = websocket.Message.Receive(ws, &ok_rsp)
-		if err != nil {
+		if _, ok := <-ws_ok_ch; !ok {
+			// Websocket was closed.
 			return
 		}
 		// Wait for update.
 		// TODO: Cancel wait if websocket is killed.
 		last_seq = rsp.seq
-		//websocket.Request
-
-		<-rsp.wchan
+		select {
+		case <-ws_ok_ch:
+			// Websocket was closed or got invalid ok.
+			return
+		case <-rsp.wchan:
+			// Updates are available.
+		}
 	}
 }
 

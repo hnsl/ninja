@@ -229,7 +229,116 @@ function fs_state_get(name, default)
     return textutils.unserialize(data)
 end
 
+local commonNames = {
+    ["minecraft:stone"] = true,
+    ["minecraft:cobblestone"] = true,
+    ["minecraft:dirt"] = true,
+    ["minecraft:gravel"] = true,
+    ["chisel:marble"] = true,
+    ["chisel:diorite"] = true,
+    ["chisel:andesite"] = true,
+    ["chisel:granite"] = true,
+}
+
+local commonItems = {}
+
+-- Returns true if details from inspect is a common block and not interesting.
+function commonBlock(details)
+    if commonNames[details.name] or commonItems[details.id] then
+        return true
+    end
+    return false
+end
+
 -- Turtle robot logic.
+
+function getItemDetail(slotNum)
+    local out = turtle.getItemDetail(slotNum)
+    if out == nil then
+        return nil
+    end
+    -- Damage = metadata for blocks. Both damage and metadata must be
+    -- equiviallent for items, otherwise items are considered different
+    -- and cannot ever be stacked.
+    out.id = out.name .. "/" .. tostring(out.damage)
+    return out
+end
+
+function attack(dir)
+    local ok, lret = look(dir)
+    if not ok then
+        return false
+    end
+    if lret == look_fwd then
+        return turtle.attack()
+    elseif lret == look_up then
+        return turtle.attackUp()
+    elseif lret == look_down then
+        return turtle.attackDown()
+    end
+end
+
+function dig(dir)
+    local ok, lret = look(dir)
+    if not ok then
+        return false
+    end
+    if lret == look_fwd then
+        return turtle.dig()
+    elseif lret == look_up then
+        return turtle.digUp()
+    elseif lret == look_down then
+        return turtle.digDown()
+    end
+end
+
+function place(dir)
+    local ok, lret = look(dir)
+    if not ok then
+        return false
+    end
+    if lret == look_fwd then
+        return turtle.place()
+    elseif lret == look_up then
+        return turtle.placeUp()
+    elseif lret == look_down then
+        return turtle.placeDown()
+    end
+end
+
+function detect(dir)
+    local ok, lret = look(dir)
+    if not ok then
+        return false, nil
+    end
+    if lret == look_fwd then
+        return true, turtle.detect()
+    elseif lret == look_up then
+        return true, turtle.detectUp()
+    elseif lret == look_down then
+        return true, turtle.detectDown()
+    end
+end
+
+function inspect(dir)
+    local ok, lret = look(dir)
+    if not ok then
+        return nil, false
+    end
+    local success, data
+    if lret == look_fwd then
+        success, data = turtle.inspect()
+    elseif lret == look_up then
+        success, data = turtle.inspectUp()
+    elseif lret == look_down then
+        success, data = turtle.inspectDown()
+    end
+    if success then
+        -- Generate virtual id, see getItemDetail().
+        data.id = data.name .. "/" .. tostring(data.metadata)
+    end
+    return success, data
+end
 
 function orientate()
     -- Use hard coded peers.
@@ -350,18 +459,6 @@ function upgradeKernel()
     flashKernel(new_kernel)
 end
 
-function getItemDetail(slotNum)
-    local out = turtle.getItemDetail(slotNum)
-    if out == nil then
-        return nil
-    end
-    -- Damage = metadata for blocks. Both damage and metadata must be
-    -- equiviallent for items, otherwise items are considered different
-    -- and cannot ever be stacked.
-    out.id = out.name .. "/" .. tostring(out.damage)
-    return out
-end
-
 -- Returns inventory count.
 function inventoryCount()
     local inv_count = {
@@ -437,6 +534,13 @@ function lowPrioWait()
         trigger_report()
     end
     os.sleep(2)
+end
+
+function executeWorkIdle(work)
+    local instr = work.instructions
+    os.sleep(instr.time)
+    work.complete = true
+    saveCurWork()
 end
 
 function executeWorkGo(work)
@@ -777,8 +881,165 @@ function executeWorkQueue(work)
     end
 end
 
+function executeWorkMine(work)
+    local instr = work.instructions
+    local wp_stack = instr.waypoint_stack
+    if #wp_stack == 0 then
+        -- Complete.
+        work.complete = true
+    else
+        -- Move to next coordinate.
+        local wp = wp_stack[#wp_stack]
+        local there = false
+        while not there do
+            -- Handle dynamic mining.
+            if instr.dynamic then
+                for i = 1, 6 do
+                    local orient = curOrient()
+                    local dir
+                    if i <= 4 then
+                        dir = vec3_rot90_y(orient.dir, false)
+                    elseif i == 5 then
+                        dir = {0, -1, 0}
+                    elseif i == 6 then
+                        dir = {0, 1, 0}
+                    end
+                    -- Inspect in this direction.
+                    local detect_ok, block = detect(dir)
+                    if not detect_ok then
+                        workError("mine: detect " .. fmt(dir) .. " failed")
+                        return
+                    end
+                    if block then
+                        local inspect_ok, details = inspect(dir)
+                        if not inspect_ok then
+                            workError("mine: inspect " .. fmt(dir) .. " failed")
+                            return
+                        end
+                        if not commonBlock(details) then
+                            -- Found uncommon block, dig it.
+                            local dig_ok = dig(dir)
+                            if not dig_ok then
+                                workError("mine: dig " .. fmt(dir) .. " failed")
+                                return
+                            end
+                        end
+                    end
+                end
+            end
+            -- Mine to next position.
+            local orient = curOrient()
+            for i = 1, 4 do
+                if i > 3 then
+                    -- We have reached waypoint.
+                    there = true
+                    break
+                elseif orient.pos[i] ~= wp[i] then
+                    -- Move in this dimension.
+                    local dir = {0, 0, 0}
+                    dir[i] = (orient.pos[i] < wp[i] and 1) or -1
+                    local detect_ok, block = detect(dir)
+                    if not detect_ok then
+                        workError("mine: detect " .. fmt(dir) .. " failed")
+                        return
+                    end
+                    if block then
+                        -- Mine block in path.
+                        local dig_ok = dig(dir)
+                        if not dig_ok then
+                            workError("mine: dig " .. fmt(dir) .. " failed")
+                            return
+                        end
+                    end
+                    local move_ok = move(dir)
+                    if not move_ok then
+                        workError("mine: move " .. fmt(dir) .. " failed")
+                        return
+                    end
+                    break
+                end
+            end
+        end
+        -- Update work if still current.
+        -- This is cancellation and work update safe.
+        table.remove(wp_stack)
+    end
+    saveCurWork()
+end
+
+function executeWorkConstruct(work)
+    local instr = work.instructions
+
+    local wp_stack = instr.waypoint_stack
+    if #wp_stack == 0 then
+        -- Complete.
+        work.complete = true
+    else
+        -- Move to next coordinate.
+        local wp = wp_stack[#wp_stack]
+        local there = false
+        while not there do
+            -- Place what we construct if there is room.
+            -- This check is required to prevent race (place -> reboot -> place).
+            local detect_ok, block = detect(instr.dir)
+            if not detect_ok then
+                workError("construct: detect " .. fmt(instr.dir) .. " failed")
+                return
+            end
+            if not block then
+                -- Select block and place it.
+                for i = 1, 17 do
+                    if i > 16 then
+                        workError("construct: out of " .. fmt(instr.item))
+                        return
+                    end
+                    local detail = getItemDetail(i)
+                    if detail ~= nil and detail.id == instr.item then
+                        local select_ok = turtle.select(cur_slot)
+                        if not select_ok then
+                            workError("construct: selecting slot " .. fmt(cur_slot) .. " failed")
+                            return
+                        end
+                        local place_ok = place(instr.dir)
+                        if not place_ok then
+                            workError("construct: place " .. fmt(instr.dir) .. " failed")
+                            return
+                        end
+                    end
+                end
+            end
+            -- Mine to next position.
+            local orient = curOrient()
+            for i = 1, 4 do
+                if i > 3 then
+                    -- We have reached waypoint.
+                    there = true
+                    break
+                elseif orient.pos[i] ~= wp[i] then
+                    -- Move in this dimension.
+                    local dir = {0, 0, 0}
+                    dir[i] = (orient.pos[i] < wp[i] and 1) or -1
+                    local move_ok = move(dir)
+                    if not move_ok then
+                        workError("construct: move " .. fmt(dir) .. " failed")
+                        return
+                    end
+                    break
+                end
+            end
+        end
+        -- Update work if still current.
+        -- This is cancellation and work update safe.
+        table.remove(wp_stack)
+    end
+    work.complete = true
+    saveCurWork()
+end
+
 function executeWork(work)
-    if work.type == "go" then
+    if work.type == "idle" then
+        executeWorkIdle(work)
+    elseif work.type == "go" then
         executeWorkGo(work)
     elseif work.type == "suck" then
         executeWorkSuck(work)
@@ -788,6 +1049,10 @@ function executeWork(work)
         executeWorkRefuel(work)
     elseif work.type == "queue" then
         executeWorkQueue(work)
+    elseif work.type == "mine" then
+        executeWorkMine(work)
+    elseif work.type == "construct" then
+        executeWorkConstruct(work)
     else
         fatalError("unknown work type: " .. fmt(work.type))
     end

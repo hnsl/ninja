@@ -180,6 +180,8 @@ func mgrDecideWork(t turtle) *string {
 	switch area := area.(type) {
 	case *storageArea:
 		return mgrDecideStorageWork(t, area)
+	case *mineArea:
+		return mgrDecideMineWork(t, area)
 	default:
 		log.Printf("decide work: error: do not understand area type: %T", area)
 		return nil
@@ -215,6 +217,22 @@ func loadArea(area_id areaID, area_dir string) {
 	}
 	area_type := area_parts[0]
 	switch area_type {
+	case "mine":
+		m := new(mineArea)
+		m.Path = fmt.Sprintf("%s/details", area_dir)
+		loadJSON(m.Path, m)
+		if m.ID != area_id {
+			panic(fmt.Sprintf("invalid mine id: %v, expected: %v", m.ID, area_id))
+		}
+		if m.MineProgress == nil {
+			m.MineProgress = map[string][5]boreholeState{}
+		}
+		if m.MineAllocs == nil {
+			m.MineAllocs = map[turtleID]*mineOrder{}
+		}
+		// Write new area.
+		areas[area_id] = m
+		log.Printf("loaded mine: %v\n", m.ID)
 	case "storage":
 		s := new(storageArea)
 		s.Path = fmt.Sprintf("%s/details", area_dir)

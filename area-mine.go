@@ -24,9 +24,8 @@ type mineArea struct {
 	NextClear int `json:"next_clear"`
 	NextMine  int `json:"next_mine"`
 	// all mines in progress have the state of their 5 borehole jobs mapped here
-	MineProgress map[int][5]boreholeState `json:"mine_progress"`
-	MineAllocs   map[turtleID]*mineOrder  `json:"mine_allocs"`
-	ClearAlloc   turtleID                 `json:"clear_alloc"`
+	MineProgress map[string][5]boreholeState `json:"mine_progress"`
+	MineAllocs   map[turtleID]*mineOrder     `json:"mine_allocs"`
 }
 
 func (m mineArea) store() {
@@ -206,9 +205,12 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 			// Completed clearing a mine section.
 			m.NextClear++
 		case mineOrderDrill:
+			// TODO: Register statistics here.
+			// TODO: Check t.InvCount.Grouped and register what we found for this borehole.
+
 			// Note that borehole is complete for mine.
 			mine_id := getBoreholeMineID(order.BoreholeID)
-			mine_progress := m.MineProgress[mine_id]
+			mine_progress := m.MineProgress[itoa(mine_id)]
 			if mine_progress[order.BoreholeID] != boreholeInProgress {
 				log.Printf("mine work error: turtle %v: current bore order: %#v,"+
 					" does not match mine progress: %#v", t.Label, order, m.MineProgress)
@@ -224,7 +226,7 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 			}
 			if mine_complete {
 				log.Printf("mine work: completed mine #%v", mine_id)
-				delete(m.MineProgress, mine_id)
+				delete(m.MineProgress, itoa(mine_id))
 			}
 		}
 		// Mine allocation complete, remove it.
@@ -331,13 +333,14 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 			order.Type = mineOrderDrill
 			order.BoreholeID = borehole_id
 			m.MineAllocs[t.Label] = order
-			mine_progress := m.MineProgress[mine_id]
+			mine_progress := m.MineProgress[itoa(mine_id)]
 			mine_progress[borehole_id] = boreholeInProgress
 			job := makeMineOrderJob(t, *m, *order)
 			return &job
 		}
 		// Find an undrilled borehole.
-		for mine_id, mine_progress := range m.MineProgress {
+		for mine_id_str, mine_progress := range m.MineProgress {
+			mine_id := atoi(mine_id_str)
 			for borehole_id, borehole := range mine_progress {
 				if borehole == boreholeUndrilled {
 					// Generate drill order.
@@ -354,7 +357,7 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 			for i := range mine_progress {
 				mine_progress[i] = boreholeUndrilled
 			}
-			m.MineProgress[mine_id] = mine_progress
+			m.MineProgress[itoa(mine_id)] = mine_progress
 			m.NextMine++
 			return create_drill_order(mine_id, borehole_id)
 		}
@@ -467,18 +470,17 @@ func makeClearMineOrderJob(t turtle, m mineArea, order mineOrder, mine_coord vec
 	init_pos := vec3Add(attack_pos, attack_dir)
 	waypoints := []vec3{init_pos}
 	cur_pos := init_pos
+	z_dir := init_pos[2] < mine_coord[2]
 	for y := 0; y < 2; y++ {
-		for z := 0; z < 5; z++ {
-			if cur_pos[0] > mine_coord[0] {
-				// Go x- in z lane.
-				cur_pos[0] = mine_coord[0]
-			} else {
-				// Go x+ in z lane.
-				cur_pos[0] = mine_coord[0] + 9
-			}
+		if y > 0 {
+			// Go y+ to next plane.
+			cur_pos[1]++
 			waypoints = append(waypoints, cur_pos)
-			if z < 4 {
-				if init_pos[2] < mine_coord[2] {
+			z_dir = !z_dir
+		}
+		for z := 0; z < 5; z++ {
+			if z > 0 {
+				if z_dir {
 					// Go z+ to next z lane.
 					cur_pos[2]++
 				} else {
@@ -487,10 +489,15 @@ func makeClearMineOrderJob(t turtle, m mineArea, order mineOrder, mine_coord vec
 				}
 				waypoints = append(waypoints, cur_pos)
 			}
+			if cur_pos[0] > mine_coord[0] {
+				// Go x- in z lane.
+				cur_pos[0] = mine_coord[0]
+			} else {
+				// Go x+ in z lane.
+				cur_pos[0] = mine_coord[0] + 9
+			}
+			waypoints = append(waypoints, cur_pos)
 		}
-		// Go y+ to next plane.
-		cur_pos[1]++
-		waypoints = append(waypoints, cur_pos)
 	}
 	return makeJobMine(order.ID, waypoints, false)
 }

@@ -23,6 +23,15 @@ func check(err error) {
 	}
 }
 
+func itoa(n int) string {
+	return strconv.Itoa(n)
+}
+
+func atoi(s string) int {
+	n, _ := strconv.ParseInt(s, 10, 64)
+	return int(n)
+}
+
 var web_root_dir string
 
 func main() {

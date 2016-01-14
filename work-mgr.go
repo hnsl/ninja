@@ -193,9 +193,15 @@ func pathSyncKey(fs_path string) string {
 }
 
 func storeJSON(fs_path string, src interface{}) {
+	storeJSONSync(fs_path, src, true)
+}
+
+func storeJSONSync(fs_path string, src interface{}, sync bool) {
 	raw, err := json.MarshalIndent(src, "", "\t")
 	check(err)
-	syncNotify(pathSyncKey(fs_path), string(raw))
+	if sync {
+		syncNotify(pathSyncKey(fs_path), string(raw))
+	}
 	err = ioutil.WriteFile(fs_path, raw, 0644)
 	check(err)
 }

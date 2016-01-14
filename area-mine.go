@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"path"
+	"time"
 )
 
 type boreholeState int
@@ -205,9 +207,6 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 			// Completed clearing a mine section.
 			m.NextClear++
 		case mineOrderDrill:
-			// TODO: Register statistics here.
-			// TODO: Check t.InvCount.Grouped and register what we found for this borehole.
-
 			// Note that borehole is complete for mine.
 			mine_borehole_offs := getBoreholeOffsInMine(order.BoreholeID)
 			mine_id := getBoreholeMineID(order.BoreholeID)
@@ -229,6 +228,16 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 				log.Printf("mine work: completed mine #%v", mine_id)
 				delete(m.MineProgress, itoa(mine_id))
 			}
+			// Write borehole statistics.
+			stats := map[string]interface{}{
+				"time":               time.Now().Format("2006-01-02 15:04:05"),
+				"borehole_id":        order.BoreholeID,
+				"mine_id":            mine_id,
+				"mine_borehole_offs": mine_borehole_offs,
+				"turtle":             t.Label,
+				"items":              t.InvCount.Grouped,
+			}
+			storeJSONSync(path.Dir(m.Path)+"/stats/"+itoa(order.BoreholeID), stats, false)
 		}
 		// Mine allocation complete, remove it.
 		delete(m.MineAllocs, t.Label)

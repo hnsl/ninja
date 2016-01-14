@@ -10,6 +10,18 @@ func luaSerialVec3(v vec3) string {
     return fmt.Sprintf("{%d, %d, %d}", v[0], v[1], v[2])
 }
 
+func luaSerialVec3Arr(vecs []vec3, invert bool) string {
+    parts := make([]string, len(vecs))
+    for i, vec := range(vecs) {
+        dst := i
+        if invert {
+            dst = len(vecs) - i - 1
+        }
+        parts[dst] = luaSerialVec3(vec) + ","
+    }
+    return strings.Join(parts, "")
+}
+
 var tplJobIdle = `new_job = {
     id = %d,
     type = "idle",
@@ -33,11 +45,7 @@ var tplJobGo = `new_job = {
 `
 
 func makeJobGo(id workID, waypoints []vec3) string {
-    wp_parts := make([]string, len(waypoints))
-    for i, wp := range(waypoints) {
-        wp_parts[len(waypoints) - i - 1] = luaSerialVec3(wp) + ","
-    }
-    wp_srl := strings.Join(wp_parts, "")
+    wp_srl := luaSerialVec3Arr(waypoints, true)
     return fmt.Sprintf(tplJobGo, id, wp_srl)
 }
 
@@ -123,21 +131,22 @@ var tplJobMine = `new_job = {
     type = "mine",
     instructions = {
         waypoint_stack = {%s},
+        extra_dirs = {%s},
         dynamic = %t,
+        clear = %t,
     },
 },`
 
 // Creates a mine job.
 // A static mine job means just drill forward to the next waypoint.
+// Extra dirs can be added to mine in other directions than forward
+// after each step taken.
 // A dynamic mine job means to also look around for intresting blocks that will
 // be selectively mined.
-func makeJobMine(id workID, waypoints []vec3, dynamic bool) string {
-    wp_parts := make([]string, len(waypoints))
-    for i, wp := range(waypoints) {
-        wp_parts[len(waypoints) - i - 1] = luaSerialVec3(wp) + ","
-    }
-    wp_srl := strings.Join(wp_parts, "")
-    return fmt.Sprintf(tplJobMine, id, wp_srl, dynamic)
+func makeJobMine(id workID, waypoints []vec3, extra_dirs []vec3, dynamic bool, clear bool) string {
+    wp_srl := luaSerialVec3Arr(waypoints, true)
+    extra_dirs_srl := luaSerialVec3Arr(extra_dirs, false)
+    return fmt.Sprintf(tplJobMine, id, wp_srl, extra_dirs_srl, dynamic, clear)
 }
 
 var tplJobConstruct = `new_job = {
@@ -155,11 +164,7 @@ var tplJobConstruct = `new_job = {
 // in the specified direction while walking towards dir.
 func makeJobConstruct(id workID, item_id itemID, waypoints []vec3, dir vec3) string {
     item_srl := strconv.Quote(string(item_id))
-    wp_parts := make([]string, len(waypoints))
-    for i, wp := range(waypoints) {
-        wp_parts[len(waypoints) - i - 1] = luaSerialVec3(wp) + ","
-    }
-    wp_srl := strings.Join(wp_parts, "")
+    wp_srl := luaSerialVec3Arr(waypoints, true)
     dir_srl := luaSerialVec3(dir)
-    return fmt.Sprintf(tplJobMine, id, item_srl, wp_srl, dir_srl)
+    return fmt.Sprintf(tplJobConstruct, id, item_srl, wp_srl, dir_srl)
 }

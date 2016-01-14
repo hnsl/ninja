@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 60
+version = 69
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -250,6 +250,20 @@ function commonBlock(details)
     return false
 end
 
+
+local fallingNames = {
+    ["minecraft:dirt"] = true,
+    ["minecraft:sand"] = true,
+}
+
+-- Returns true if details from inspect is a falling block.
+function fallingBlock(details)
+    if commonNames[details.name] then
+        return true
+    end
+    return false
+end
+
 -- Turtle robot logic.
 
 function getItemDetail(slotNum)
@@ -338,6 +352,62 @@ function inspect(dir)
         data.id = data.name .. "/" .. tostring(data.metadata)
     end
     return success, data
+end
+
+function mine(dir, clear)
+    while true do
+        local detect_ok, block = detect(dir)
+        if not detect_ok then
+            return false, ("detect " .. fmt(dir) .. " failed")
+        end
+        if not block then
+            return true, nil
+        end
+        local dig_ok = dig(dir)
+        if not dig_ok then
+            return false, ("dig " .. fmt(dir) .. " failed")
+        end
+        if not clear or vec_equal(dir, {0, -1, 0}) then
+            return true, nil
+        end
+        -- Wait 1 second for any block to fall down.
+        os.sleep(1)
+    end
+end
+
+function dynamicMine()
+    for i = 1, 6 do
+        local orient = curOrient()
+        local dir
+        if i <= 4 then
+            dir = vec3_rot90_y(orient.rot, false)
+        elseif i == 5 then
+            dir = {0, -1, 0}
+        elseif i == 6 then
+            dir = {0, 1, 0}
+        end
+        -- Inspect in this direction.
+        local detect_ok, block = detect(dir)
+        if not detect_ok then
+            workError("mine: detect " .. fmt(dir) .. " failed")
+            return
+        end
+        if block then
+            local inspect_ok, details = inspect(dir)
+            if not inspect_ok then
+                workError("mine: inspect " .. fmt(dir) .. " failed")
+                return
+            end
+            if not commonBlock(details) then
+                -- Found uncommon block, dig it.
+                local dig_ok = dig(dir)
+                if not dig_ok then
+                    workError("mine: dig " .. fmt(dir) .. " failed")
+                    return
+                end
+            end
+        end
+    end
 end
 
 function orientate()
@@ -892,41 +962,6 @@ function executeWorkMine(work)
         local wp = wp_stack[#wp_stack]
         local there = false
         while not there do
-            -- Handle dynamic mining.
-            if instr.dynamic then
-                for i = 1, 6 do
-                    local orient = curOrient()
-                    local dir
-                    if i <= 4 then
-                        dir = vec3_rot90_y(orient.dir, false)
-                    elseif i == 5 then
-                        dir = {0, -1, 0}
-                    elseif i == 6 then
-                        dir = {0, 1, 0}
-                    end
-                    -- Inspect in this direction.
-                    local detect_ok, block = detect(dir)
-                    if not detect_ok then
-                        workError("mine: detect " .. fmt(dir) .. " failed")
-                        return
-                    end
-                    if block then
-                        local inspect_ok, details = inspect(dir)
-                        if not inspect_ok then
-                            workError("mine: inspect " .. fmt(dir) .. " failed")
-                            return
-                        end
-                        if not commonBlock(details) then
-                            -- Found uncommon block, dig it.
-                            local dig_ok = dig(dir)
-                            if not dig_ok then
-                                workError("mine: dig " .. fmt(dir) .. " failed")
-                                return
-                            end
-                        end
-                    end
-                end
-            end
             -- Mine to next position.
             local orient = curOrient()
             for i = 1, 4 do
@@ -938,23 +973,28 @@ function executeWorkMine(work)
                     -- Move in this dimension.
                     local dir = {0, 0, 0}
                     dir[i] = (orient.pos[i] < wp[i] and 1) or -1
-                    local detect_ok, block = detect(dir)
-                    if not detect_ok then
-                        workError("mine: detect " .. fmt(dir) .. " failed")
+                    -- Mine block in path.
+                    local mine_ok, err = mine(dir, instr.clear)
+                    if not mine_ok then
+                        workError("mine: mine failed: " .. err)
                         return
-                    end
-                    if block then
-                        -- Mine block in path.
-                        local dig_ok = dig(dir)
-                        if not dig_ok then
-                            workError("mine: dig " .. fmt(dir) .. " failed")
-                            return
-                        end
                     end
                     local move_ok = move(dir)
                     if not move_ok then
                         workError("mine: move " .. fmt(dir) .. " failed")
                         return
+                    end
+                    -- Mine in extra directions.
+                    for i,dir in ipairs(instr.extra_dirs) do
+                        local mine_ok, err = mine(dir, instr.clear)
+                        if not mine_ok then
+                            workError("mine: mine failed: " .. err)
+                            return
+                        end
+                    end
+                    -- Handle dynamic mining.
+                    if instr.dynamic then
+                        dynamicMine()
                     end
                     break
                 end
@@ -995,9 +1035,9 @@ function executeWorkConstruct(work)
                     end
                     local detail = getItemDetail(i)
                     if detail ~= nil and detail.id == instr.item then
-                        local select_ok = turtle.select(cur_slot)
+                        local select_ok = turtle.select(i)
                         if not select_ok then
-                            workError("construct: selecting slot " .. fmt(cur_slot) .. " failed")
+                            workError("construct: selecting slot " .. fmt(i) .. " failed")
                             return
                         end
                         local place_ok = place(instr.dir)
@@ -1093,6 +1133,9 @@ end
     -- as it's only used as a last resort.
     local refuel_min = 1
     local refuel_max = 100
+
+    -- Maximum number of brain ticks per second.
+    local max_fps = 2
 
     function fatalError(err)
         local full_err = "fatal error: " .. fmt(err)
@@ -1569,12 +1612,19 @@ end
         end
     end), (function()
         -- Brain tick with a one second rate limit in case of hysterical panic.
+        local max_spf = 1 / max_fps
         while true do
+            local t0 = os.clock()
             if not brainTick() then
                 debug("fatal error in brain: enabling permanent apathy")
                 return
             end
-            sleep(1)
+            -- Apply maximum brain tick fps limit.
+            local dt = os.clock() - t0
+            local wait = max_spf - dt
+            if wait > 0 then
+                os.sleep(wait)
+            end
         end
     end))
 end)()

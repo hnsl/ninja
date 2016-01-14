@@ -225,7 +225,7 @@ func loadArea(area_id areaID, area_dir string) {
 			panic(fmt.Sprintf("invalid mine id: %v, expected: %v", m.ID, area_id))
 		}
 		if m.MineProgress == nil {
-			m.MineProgress = map[string][5]boreholeState{}
+			m.MineProgress = map[string][]boreholeState{}
 		}
 		if m.MineAllocs == nil {
 			m.MineAllocs = map[turtleID]*mineOrder{}

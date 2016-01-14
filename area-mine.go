@@ -24,8 +24,8 @@ type mineArea struct {
 	NextClear int `json:"next_clear"`
 	NextMine  int `json:"next_mine"`
 	// all mines in progress have the state of their 5 borehole jobs mapped here
-	MineProgress map[string][5]boreholeState `json:"mine_progress"`
-	MineAllocs   map[turtleID]*mineOrder     `json:"mine_allocs"`
+	MineProgress map[string][]boreholeState `json:"mine_progress"`
+	MineAllocs   map[turtleID]*mineOrder    `json:"mine_allocs"`
 }
 
 func (m mineArea) store() {
@@ -62,10 +62,10 @@ func (m mineArea) getUnloadBoxCoord() vec3 {
 	return vec3Add(m.Pos, vec3{5, 1, -2})
 }
 
-func (m mineArea) getTorchCoords() []vec3 {
+func (m mineArea) getTorchOffsets() []vec3 {
 	return []vec3{
-		vec3Add(m.Pos, vec3{2, 0, -2}),
-		vec3Add(m.Pos, vec3{7, 0, -2}),
+		vec3{2, 0, -2},
+		vec3{7, 0, -2},
 	}
 }
 
@@ -137,16 +137,16 @@ type mineAlloc struct {
 }
 
 var boreholeOffsets = []vec3{
-	{0, 0, 0},
-	{1, 0, -2},
-	{2, 0, -4},
-	{3, 0, -1},
-	{4, 0, -3},
-	{5, 0, 0},
-	{6, 0, -2},
-	{7, 0, -4},
-	{8, 0, -1},
-	{9, 0, -3},
+	{0, -1, 0},
+	{1, -1, -2},
+	{2, -1, -4},
+	{3, -1, -1},
+	{4, -1, -3},
+	{5, -1, 0},
+	{6, -1, -2},
+	{7, -1, -4},
+	{8, -1, -1},
+	{9, -1, -3},
 }
 
 // Returns the offset of the global borehole id in a local mine.
@@ -209,14 +209,15 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 			// TODO: Check t.InvCount.Grouped and register what we found for this borehole.
 
 			// Note that borehole is complete for mine.
+			mine_borehole_offs := getBoreholeOffsInMine(order.BoreholeID)
 			mine_id := getBoreholeMineID(order.BoreholeID)
 			mine_progress := m.MineProgress[itoa(mine_id)]
-			if mine_progress[order.BoreholeID] != boreholeInProgress {
+			if mine_progress[mine_borehole_offs] != boreholeInProgress {
 				log.Printf("mine work error: turtle %v: current bore order: %#v,"+
 					" does not match mine progress: %#v", t.Label, order, m.MineProgress)
 				return nil
 			}
-			mine_progress[order.BoreholeID] = boreholeComplete
+			mine_progress[mine_borehole_offs] = boreholeComplete
 			mine_complete := true
 			for _, state := range mine_progress {
 				if state != boreholeComplete {
@@ -325,26 +326,26 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 
 	// Handler for drilling.
 	tryDrill := func() *string {
-		create_drill_order := func(mine_id int, borehole_id int) *string {
+		create_drill_order := func(mine_id int, mine_borehole_offs int) *string {
 			pending_area_changes = true
 			m.WorkIDSeq++
 			order := new(mineOrder)
 			order.ID = workID(m.WorkIDSeq)
 			order.Type = mineOrderDrill
-			order.BoreholeID = borehole_id
+			order.BoreholeID = mine_id*5 + mine_borehole_offs
 			m.MineAllocs[t.Label] = order
 			mine_progress := m.MineProgress[itoa(mine_id)]
-			mine_progress[borehole_id] = boreholeInProgress
+			mine_progress[mine_borehole_offs] = boreholeInProgress
 			job := makeMineOrderJob(t, *m, *order)
 			return &job
 		}
 		// Find an undrilled borehole.
 		for mine_id_str, mine_progress := range m.MineProgress {
 			mine_id := atoi(mine_id_str)
-			for borehole_id, borehole := range mine_progress {
+			for mine_borehole_offs, borehole := range mine_progress {
 				if borehole == boreholeUndrilled {
 					// Generate drill order.
-					return create_drill_order(mine_id, borehole_id)
+					return create_drill_order(mine_id, mine_borehole_offs)
 				}
 			}
 		}
@@ -352,14 +353,14 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 		if m.NextMine < m.NextClear {
 			pending_area_changes = true
 			mine_id := m.NextMine
-			borehole_id := 0
+			mine_borehole_offs := 0
 			mine_progress := [5]boreholeState{}
 			for i := range mine_progress {
 				mine_progress[i] = boreholeUndrilled
 			}
-			m.MineProgress[itoa(mine_id)] = mine_progress
+			m.MineProgress[itoa(mine_id)] = mine_progress[:]
 			m.NextMine++
-			return create_drill_order(mine_id, borehole_id)
+			return create_drill_order(mine_id, mine_borehole_offs)
 		}
 		return nil
 	}
@@ -388,7 +389,7 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 func makeMineOrderJob(t turtle, m mineArea, order mineOrder) string {
 	switch order.Type {
 	case mineOrderClear:
-		torch_item_id := itemID("minecraft:torch/0")
+		torch_item_id := itemID("Railcraft:lantern.stone/9")
 		mine_coord := m.getMineCoord(m.NextClear)
 		switch {
 		case order.State == 2:
@@ -409,7 +410,7 @@ func makeMineOrderJob(t turtle, m mineArea, order mineOrder) string {
 			return makeClearMineOrderJob(t, m, order, mine_coord)
 		case order.State < 2:
 			// Place torch.
-			coord := m.getTorchCoords()[order.State]
+			coord := vec3Add(mine_coord, m.getTorchOffsets()[order.State])
 			place_pos := vec3Add(coord, vec3{0, 1, 0})
 			place_dir := vec3{0, -1, 0}
 			// Go to construct position.
@@ -422,10 +423,16 @@ func makeMineOrderJob(t turtle, m mineArea, order mineOrder) string {
 			panic(fmt.Sprintf("invalid order state %v", order.State))
 		}
 	case mineOrderDrill:
-		// Drill.
+		// Go to drill position.
 		waypoints := m.getBoreholeWaypoints(order.BoreholeID)
+		start_pos := vec3Add(waypoints[0], vec3{0, 1, 0})
+		if !vec3Equal(t.CurPos, start_pos) {
+			return makeJobGo(workIDTmp, []vec3{start_pos})
+		}
+		// Drill.
 		dynamic := true
-		return makeJobMine(order.ID, waypoints, dynamic)
+		clear := false
+		return makeJobMine(order.ID, waypoints, []vec3{}, dynamic, clear)
 	default:
 		panic(fmt.Sprintf("unknown order type %v", order.Type))
 	}
@@ -471,33 +478,28 @@ func makeClearMineOrderJob(t turtle, m mineArea, order mineOrder, mine_coord vec
 	waypoints := []vec3{init_pos}
 	cur_pos := init_pos
 	z_dir := init_pos[2] < mine_coord[2]
-	for y := 0; y < 2; y++ {
-		if y > 0 {
-			// Go y+ to next plane.
-			cur_pos[1]++
-			waypoints = append(waypoints, cur_pos)
-			z_dir = !z_dir
-		}
-		for z := 0; z < 5; z++ {
-			if z > 0 {
-				if z_dir {
-					// Go z+ to next z lane.
-					cur_pos[2]++
-				} else {
-					// Go z- to next z lane.
-					cur_pos[2]--
-				}
-				waypoints = append(waypoints, cur_pos)
-			}
-			if cur_pos[0] > mine_coord[0] {
-				// Go x- in z lane.
-				cur_pos[0] = mine_coord[0]
+	for z := 0; z < 5; z++ {
+		if z > 0 {
+			if z_dir {
+				// Go z+ to next z lane.
+				cur_pos[2]++
 			} else {
-				// Go x+ in z lane.
-				cur_pos[0] = mine_coord[0] + 9
+				// Go z- to next z lane.
+				cur_pos[2]--
 			}
 			waypoints = append(waypoints, cur_pos)
 		}
+		if cur_pos[0] > mine_coord[0] {
+			// Go x- in z lane.
+			cur_pos[0] = mine_coord[0]
+		} else {
+			// Go x+ in z lane.
+			cur_pos[0] = mine_coord[0] + 9
+		}
+		waypoints = append(waypoints, cur_pos)
 	}
-	return makeJobMine(order.ID, waypoints, false)
+	extra_dirs := []vec3{vec3{0, 1, 0}}
+	dynamic := false
+	clear := true
+	return makeJobMine(order.ID, waypoints, extra_dirs, dynamic, clear)
 }

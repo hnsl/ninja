@@ -230,7 +230,7 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 			}
 			// Write borehole statistics.
 			stats := map[string]interface{}{
-				"time":               time.Now().Format("2006-01-02 15:04:05"),
+				"time":               time.Now().UTC().Format("2006-01-02 15:04:05"),
 				"borehole_id":        order.BoreholeID,
 				"mine_id":            mine_id,
 				"mine_borehole_offs": mine_borehole_offs,

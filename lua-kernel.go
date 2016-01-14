@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 69
+version = 71
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -238,6 +238,10 @@ local commonNames = {
     ["chisel:diorite"] = true,
     ["chisel:andesite"] = true,
     ["chisel:granite"] = true,
+    ["minecraft:torch/0"] = true,
+    ["ComputerCraft:CC-Turtle"] = true,
+    ["ComputerCraft:CC-TurtleExpanded"] = true,
+    ["ComputerCraft:CC-TurtleAdvanced"] = true,
 }
 
 local commonItems = {}

@@ -155,7 +155,6 @@ function reconnect() {
 }
 
 $.get("items/item-map.json", function(data) {
-    console.log(data);
     item_map = data;
     reconnect();
 });

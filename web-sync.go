@@ -44,7 +44,15 @@ func syncGo() {
 		req := <-syncChan
 		switch req := req.(type) {
 		case syncNotifyReq:
-			dlog.Delete(kdVersion{seq: dseq[req.key]})
+			item_seq := dseq[req.key]
+			if item_seq > 0 {
+				i := dlog.Get(kdVersion{seq: item_seq})
+				cur := i.(kdVersion)
+				if cur.data == req.data {
+					continue
+				}
+				dlog.Delete(kdVersion{seq: item_seq})
+			}
 			dseq[req.key] = seq_next
 			dlog.ReplaceOrInsert(kdVersion{seq: seq_next, key: req.key, data: req.data})
 			seq_next++

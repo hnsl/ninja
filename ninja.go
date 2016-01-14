@@ -127,6 +127,7 @@ func postReport(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("incoming report: %#v\n", t)
 	// Update reported turtle data.
 	turtles[t.Label] = t
+	syncNotify("turtles/"+string(t.Label), buf.String())
 	// Prepare response.
 	var rsp bytes.Buffer
 	// Decide new work for turtle.

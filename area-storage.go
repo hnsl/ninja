@@ -392,6 +392,17 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 					log.Printf("storage work warning: turtle %v: no free box to load junk %v", t.Label, item_id)
 				} else {
 					log.Printf("storage work warning: turtle %v: out of item %v, nothing to export", t.Label, item_id)
+					// Automatically delete any export allocation of this item.
+					item_map := s.ExportAllocs[t.Label]
+					if item_map != nil {
+						if _, ok := item_map[item_id]; ok {
+							delete(item_map, item_id)
+							if len(item_map) == 0 {
+								delete(s.ExportAllocs, t.Label)
+							}
+							pending_area_changes = true
+						}
+					}
 				}
 				continue
 			}

@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 72
+version = 75
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -1326,6 +1326,21 @@ end
             -- We're stuck.
             if cur_dist <= 1 then
                 debug("step failed, destination occupied")
+                -- Have a 20% chance to move in inverse blocked direction to resolve deadlock.
+                if math.random(1, 5) == 1 then
+                    debug("attempting to resolve 'swap-d1' deadlock")
+                    for i,blocked_dir in ipairs(blocked_dirs) do
+                        local try_dir = {
+                            blocked_dir[1] * -1,
+                            blocked_dir[2] * -1,
+                            blocked_dir[3] * -1,
+                        }
+                        local move_ok = move(try_dir)
+                        if move_ok then
+                            return false
+                        end
+                    end
+                end
                 os.sleep(2)
                 return false
             end

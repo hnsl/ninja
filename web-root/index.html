@@ -9,20 +9,40 @@
 </head>
 <body>
     <div id="wrapper">
-        <h1>Inventory</h1>
-        <div class="item_grid" id="inventory_grid"></div>
-        <p>To export: Click = 1, Shift = 64, Ctrl = #</p>
+        <h1 id="nav-hdr">
+            <a href="#" data-nav="inventory">Inventory</a>
+            <a href="#" data-nav="turtles">Turtles</a>
+        </h1>
+        <div class="page page_inventory">
+            <div class="item_grid" id="inventory_grid"></div>
+            <p>To export: Click = 1, Shift = 64, Ctrl = #</p>
 
-        <h1>Exports</h1>
-        <div class="item_grid" id="exports_grid"></div>
+            <h1>Exports</h1>
+            <div class="item_grid" id="exports_grid"></div>
 
-        <h1>Exporting</h1>
-        <div class="item_grid" id="exporting_grid"></div>
+            <h1>Exporting</h1>
+            <div class="item_grid" id="exporting_grid"></div>
 
-        <div id="amount_prompt">
-            <div class="prompt_window">
-                Amount: <input id="export_count" type="text">
+            <div id="amount_prompt">
+                <div class="prompt_window">
+                    Amount: <input id="export_count" type="text">
+                </div>
             </div>
+        </div>
+        <div class="page page_turtles">
+            <table id="turtle_table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>v.</th>
+                        <th>Fuel</th>
+                        <th>Inv.</th>
+                        <th>Activity</th>
+                    </tr>
+                </tbody>
+                <tbody>
+                </tbody>
+            </table>
         </div>
     </div>
   <script src="script.js"></script>

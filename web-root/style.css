@@ -13,6 +13,15 @@ body {
 	margin: 10px;
 }
 
+#nav-hdr > a {
+    text-decoration: none;
+	color: yellow;
+}
+
+#nav-hdr > a.active {
+    text-decoration: underline;
+}
+
 h1 {
 	font-size: 24px;
 	margin-bottom: 5px;
@@ -86,4 +95,19 @@ input {
 #amount_prompt > .prompt_window > input {
     width: 30%;
     font-size: 14px;
+}
+
+#turtle_table {
+    width: 100%;
+}
+
+#turtle_table th:nth-child(1),
+#turtle_table th:nth-child(2),
+#turtle_table th:nth-child(3),
+#turtle_table th:nth-child(4) {
+    width: 1px;
+}
+
+#turtle_table td {
+    padding: 0px 5px;
 }

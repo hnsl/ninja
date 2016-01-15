@@ -120,8 +120,70 @@ function refreshInventoryUI() {
     populate_grid_fn($("#exporting_grid"), sorted_exporting);
 }
 
+function refreshTurtleUI() {
+    // console.log(state);
+    var turtles = [];
+    for (var key in state) {
+        var match = key.match(/^turtles\//);
+        if (!match) {
+            continue;
+        }
+        var turtle = state[key];
+        turtles.push(turtle);
+    }
+    turtles.sort(function(a, b) {
+        return a.label.localeCompare(b.label);
+    });
+    for (var i = 0; i < turtles.length; i++) {
+        var turtle = turtles[i];
+        turtle.elem_id = "turtle_" + turtle.label;
+        turtle.elem = document.getElementById(turtle.elem_id);
+    }
+    var turtle_list = $("#turtle_table tbody");
+    $(turtle_list).empty();
+    for (var i = 0; i < turtles.length; i++) {
+        var turtle = turtles[i];
+        var elem = turtle.elem;
+        if (!elem) {
+            elem = document.createElement("tr");
+            $(elem).attr({
+                id: turtle.elem_id,
+                class: "turtle-row",
+                "data-turtle_id": turtle.label,
+            }).html(
+                '<td class="turtle-id"></td>'
+                + '<td class="turtle-version"></td>'
+                + '<td class="turtle-fuel"></td>'
+                + '<td class="turtle-inventory"></td>'
+                + '<td class="turtle-activity"></td>'
+            ).find(".turtle-id").text(turtle.label);
+        }
+        $(turtle_list).append(elem);
+        $(elem).find(".turtle-fuel").text(turtle.fuel_lvl);
+        $(elem).find(".turtle-version").text("v" + turtle.version + (turtle.new_kernel? "*": ""));
+        var activity = turtle.cur_action;
+        if (turtle.cur_work) {
+            activity += "/" + turtle.cur_work.type + "/" + turtle.cur_work.id;
+            if (turtle.cur_work.complete) {
+                activity += " (complete)";
+            }
+        }
+        if (turtle.cur_frustration > 0) {
+            activity += " (" + turtle.cur_frustration + " frustrated)";
+        }
+        activity += " @ " + JSON.stringify(turtle.cur_pos);
+        if (turtle.cur_dst) {
+            activity += " -> " + JSON.stringify(turtle.cur_dst);
+        }
+        $(elem).find(".turtle-activity").text(activity);
+        var inventory = turtle.inv_count.free_slots + "/16";
+        $(elem).find(".turtle-inventory").text(inventory);
+    }
+}
+
 function refreshUI() {
     refreshInventoryUI();
+    refreshTurtleUI();
 }
 
 function reconnect() {
@@ -203,3 +265,17 @@ $("#export_count").on("keypress", function(ev) {
         return false;
     }
 });
+
+$("#wrapper > .page").hide();
+
+$("#nav-hdr").on("click", "> a", function(ev) {
+    ev.preventDefault();
+    var elem = ev.currentTarget;
+    var page = $(elem).data("nav");
+    $("#wrapper > .page").hide();
+    $("#wrapper > .page_" + page).show();
+    $("#nav-hdr > a").removeClass("active");
+    $(elem).addClass("active");
+});
+
+$("#nav-hdr > a:first-child").click();

@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 71
+version = 72
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -422,7 +422,7 @@ function orientate()
             rot = {-1, 0, 0},
         },
         ["10.2"] = {
-            pos = {83, 69, 806},
+            pos = {80, 61, 806},
             rot = {0, 0, 1},
         },
     }

@@ -21,18 +21,18 @@ type turtle struct {
 	NewKernel      bool `json:"new_kernel"`
 	Version        int
 	Label          turtleID
-	CurAction      string  `json:"cur_action"`
-	CurDst         vec3    `json:"cur_dst"`
-	CurBestDist    int     `json:"cur_best_dist"`
-	CurPivot       []int   `json:"cur_pivot"`
-	CurFrustration int     `json:"cur_frustration"`
-	CurPos         vec3    `json:"cur_pos"`
-	CurRot         vec3    `json:"cur_rot"`
-	CurWork        *work   `json:"cur_work"`
-	FatalErr       string  `json:"fatal_err"`
-	RefuelErr      float64 `json:"refuel_err"`
-	FuelLvl        int     `json:"fuel_lvl"`
-	InvCount       icount  `json:"inv_count"`
+	CurAction      string                 `json:"cur_action"`
+	CurDst         vec3                   `json:"cur_dst"`
+	CurBestDist    int                    `json:"cur_best_dist"`
+	CurPivot       map[string]interface{} `json:"cur_pivot"`
+	CurFrustration int                    `json:"cur_frustration"`
+	CurPos         vec3                   `json:"cur_pos"`
+	CurRot         vec3                   `json:"cur_rot"`
+	CurWork        *work                  `json:"cur_work"`
+	FatalErr       string                 `json:"fatal_err"`
+	RefuelErr      float64                `json:"refuel_err"`
+	FuelLvl        int                    `json:"fuel_lvl"`
+	InvCount       icount                 `json:"inv_count"`
 }
 
 type work struct {

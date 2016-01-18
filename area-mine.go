@@ -17,6 +17,7 @@ const (
 )
 
 type mineArea struct {
+	Enabled bool
 	Path string `json:"-"`
 	ID   areaID
 	// sequence counter for work ids
@@ -184,6 +185,12 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 	}
 	pending_area_changes := false
 
+	if !m.Enabled {
+		// TODO: Also use queue to move turtles to center of mine.
+		idle_job := makeJobIdle(workIDTmp, 20)
+		return &idle_job
+	}
+
 	// Have we completed a mining operation that we should account for?
 	if order := m.MineAllocs[t.Label]; order != nil {
 		if t.CurWork == nil || t.CurWork.ID != order.ID {
@@ -310,7 +317,7 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 
 	// Handler for clearing.
 	tryClear := func() *string {
-		ideal_clear_ahead := int(8) // How far NextClear should be kept from NextMine.
+		ideal_clear_ahead := int(32) // How far NextClear should be kept from NextMine.
 		clear_ahead := m.NextClear - m.NextMine
 		if clear_ahead >= ideal_clear_ahead {
 			return nil

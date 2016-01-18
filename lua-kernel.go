@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 75
+version = 76
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -711,9 +711,11 @@ function executeWorkSuck(work)
             end
         end
         if not suck_ok then
-            -- No more items. We are done only if general suck and got more than one item.
+            -- No more items. We are done only if general suck and got more
+            -- than one item or specific suck and got zero items.
             debug("suck: no more items")
-            suck_done = (instr.item_id == nil and suck_total > 0)
+            suck_done = (instr.item_id == nil and suck_total > 0) or
+                (instr.item_id ~= nil and suck_total == 0)
             break
         end
         -- Got at least one item.
@@ -744,6 +746,12 @@ function executeWorkSuck(work)
         -- 2. Out of free slots. (normal)
         -- 3. General suck and out of items in container after
         --    at least one successfully sucked item. (normal)
+        -- 4. Specific suck and out of items in container before
+        --    the full amount of requested items to suck was reached.
+        --    This can be caused by an out of sync between the controllers
+        --    understanding of how many items where in the box or by a suck
+        --    miscount that the controller should correct for by counting
+        --    items in inventory. In any case it's the controllers problem.
         work.complete = true
         saveCurWork()
     else
@@ -751,10 +759,6 @@ function executeWorkSuck(work)
         -- 1. General suck and out of items in container before even one item
         --    was sucked. This is a normal blocking condition, waiting for the
         --    container to get more than zero item before continuing. (normal)
-        -- 2. Specific suck and out of items in container before
-        --    the full amount of requested items to suck was reached.
-        --    This is generally an inventory problem that is temporary or that
-        --    a human should fix manually, therfore we wait and try again.
         if suck_total > 0 then
             saveCurWork()
         end

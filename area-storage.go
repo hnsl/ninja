@@ -23,6 +23,8 @@ type storageArea struct {
 	// map from turtle ids to items and amount to export
 	// an alloc here subtracts the corresponding exporting value
 	ExportAllocs map[turtleID]map[itemID]int `json:"export_allocs"`
+	// turtle that is solely responsible for large exports (> 512).
+	LargeStackTurtle turtleID `json:"large_stack_turtle"`
 }
 
 func (s storageArea) store() {
@@ -385,7 +387,13 @@ func mgrDecideStorageWork(t turtle, s *storageArea) *string {
 		}
 		// Find closest free box to drop for any item we want to drop.
 		var cand *boxCandidate
-		for item_id := range inv_x {
+		for item_id, amount := range inv_x {
+			if !drop && amount >= 512 && s.LargeStackTurtle != "" {
+				if t.Label != s.LargeStackTurtle {
+					// We have a dedicated for export of large stacks, and it's not us.
+					continue
+				}
+			}
 			used := s.closestBox(t.CurPos, item_id, drop)
 			if used == nil {
 				if drop {

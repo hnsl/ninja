@@ -18,8 +18,8 @@ const (
 
 type mineArea struct {
 	Enabled bool
-	Path string `json:"-"`
-	ID   areaID
+	Path    string `json:"-"`
+	ID      areaID
 	// sequence counter for work ids
 	WorkIDSeq int `json:"work_id_seq"`
 	Pos       vec3

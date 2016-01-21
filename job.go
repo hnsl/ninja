@@ -168,3 +168,30 @@ func makeJobConstruct(id workID, item_id itemID, waypoints []vec3, dir vec3) str
     dir_srl := luaSerialVec3(dir)
     return fmt.Sprintf(tplJobConstruct, id, item_srl, wp_srl, dir_srl)
 }
+
+var tplJobFarm = `new_job = {
+    id = %d,
+    type = "farm",
+    instructions = {
+        waypoint_stack = {%s},
+        items = %s,
+        mod_dim = %d,
+    },
+},`
+
+// Creates a farm job.
+// Before starting and after each step taken the block below the turtle will
+// be harvested (if required) and one of the specified crop seeds will be
+// planeted. The crop seed is determined by the modulus position of the turtle
+// in the specified dimension (1 = x, 2 = y, 3 = z).
+func makeJobFarm(id workID, waypoints []vec3, items []itemID, mod_dim int) string {
+    wp_srl := luaSerialVec3Arr(waypoints, true)
+    items_parts := make([]string, len(items))
+    i := 0
+    for _, item_id := range(items) {
+        items_parts[i] = fmt.Sprintf("%s,", strconv.Quote(string(item_id)))
+        i++
+    }
+    items_srl := strings.Join(items_parts, "")
+    return fmt.Sprintf(tplJobFarm, id, wp_srl, items_srl, mod_dim)
+}

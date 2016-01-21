@@ -610,7 +610,3 @@ func makeLoadOrderJob(s storageArea, lo loadOrder) string {
 		panic("expected exactly one item in load order to suck, got zero")
 	}
 }
-
-func makeQueueOrderJob(id workID, q qCoords) string {
-	return makeJobQueue(id, q.origin, q.q_dir, q.o_q0_dir, q.q0_t0_dir)
-}

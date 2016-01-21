@@ -77,6 +77,10 @@ type qCoords struct {
 	q0_t0_dir vec3 // q0 -> t0 direction
 }
 
+func makeQueueOrderJob(id workID, q qCoords) string {
+	return makeJobQueue(id, q.origin, q.q_dir, q.o_q0_dir, q.q0_t0_dir)
+}
+
 var areas = map[areaID]interface{}{}
 
 type workRequest struct {

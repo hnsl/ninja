@@ -186,6 +186,12 @@ func mgrDecideWork(t turtle) *string {
 		return mgrDecideStorageWork(t, area)
 	case *mineArea:
 		return mgrDecideMineWork(t, area)
+	case *farmArea:
+		job, err := mgrDecideFarmWork(t, area)
+		if err != nil {
+			log.Printf("farm work error: %v: %v", t.Label, err)
+		}
+		return job
 	default:
 		log.Printf("decide work: error: do not understand area type: %T", area)
 		return nil
@@ -227,6 +233,19 @@ func loadArea(area_id areaID, area_dir string) {
 	}
 	area_type := area_parts[0]
 	switch area_type {
+	case "farm":
+		f := new(farmArea)
+		f.Path = fmt.Sprintf("%s/details", area_dir)
+		loadJSON(f.Path, f)
+		if f.ID != area_id {
+			panic(fmt.Sprintf("invalid farm id: %v, expected: %v", f.ID, area_id))
+		}
+		for i, plot := range f.Plots {
+			plot.Level = i
+		}
+		// Write new area.
+		areas[area_id] = f
+		log.Printf("loaded farm: %v\n", f.ID)
 	case "mine":
 		m := new(mineArea)
 		m.Path = fmt.Sprintf("%s/details", area_dir)

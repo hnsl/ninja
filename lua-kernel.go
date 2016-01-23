@@ -1,5 +1,5 @@
 package main; var lua_src_kernel = `
-version = 76
+version = 79
 
 local base_url = "http://skogen.twitverse.com:4456/72ceda8b"
 local state_root = "/state"
@@ -341,7 +341,7 @@ end
 function inspect(dir)
     local ok, lret = look(dir)
     if not ok then
-        return nil, false
+        return false, nil
     end
     local success, data
     if lret == look_fwd then
@@ -376,6 +376,29 @@ function mine(dir, clear)
         end
         -- Wait 1 second for any block to fall down.
         os.sleep(1)
+    end
+end
+
+-- Step towards waypoint with no collision handling.
+-- Useful when movement must be extremely deterministic and can be assumed
+-- to be collision free such as when following waypoints when constructing,
+-- mining, farming etc.
+function stepTowardsWaypoint(wp)
+    local orient = curOrient()
+    for i = 1, 4 do
+        if i > 3 then
+            -- We have reached waypoint.
+            return true, nil
+        elseif orient.pos[i] ~= wp[i] then
+            -- Move in this dimension.
+            local dir = {0, 0, 0}
+            dir[i] = (orient.pos[i] < wp[i] and 1) or -1
+            local move_ok = move(dir)
+            if not move_ok then
+                return false, ("stepTowardsWaypoint: move " .. fmt(dir) .. " failed")
+            end
+            return false, nil
+        end
     end
 end
 
@@ -1060,31 +1083,89 @@ function executeWorkConstruct(work)
                     end
                 end
             end
-            -- Mine to next position.
-            local orient = curOrient()
-            for i = 1, 4 do
-                if i > 3 then
-                    -- We have reached waypoint.
-                    there = true
-                    break
-                elseif orient.pos[i] ~= wp[i] then
-                    -- Move in this dimension.
-                    local dir = {0, 0, 0}
-                    dir[i] = (orient.pos[i] < wp[i] and 1) or -1
-                    local move_ok = move(dir)
-                    if not move_ok then
-                        workError("construct: move " .. fmt(dir) .. " failed")
-                        return
-                    end
-                    break
-                end
+            -- Move to next mine position.
+            local err
+            there, err = stepTowardsWaypoint(wp)
+            if err ~= nil then
+                workError("construct: step error: " .. err)
+                return
             end
         end
         -- Update work if still current.
         -- This is cancellation and work update safe.
         table.remove(wp_stack)
     end
-    work.complete = true
+    saveCurWork()
+end
+
+function executeWorkFarm(work)
+    local harvest_limit = 7 -- Harvest crops when they reach this level.
+    local instr = work.instructions
+
+    local wp_stack = instr.waypoint_stack
+    if #wp_stack == 0 then
+        -- Complete.
+        work.complete = true
+    else
+        -- Move to next coordinate.
+        local wp = wp_stack[#wp_stack]
+        local there = false
+        local down = {0, -1, 0}
+        while not there do
+            -- First determine the seed we use here.
+            local orient = curOrient()
+            local seed_item_id = instr.items[(orient.pos[instr.mod_dim] % #instr.items) + 1]
+            -- Inspect down and determine if we should harvest and/or plant.
+            local do_plant
+            local success, detail = inspect(down)
+            if success then
+                if detail.metadata < harvest_limit then
+                    -- Skip, not yet mature or other block.
+                    do_plant = false
+                else
+                    -- Harvest!
+                    turtle.digDown()
+                    do_plant = true
+                end
+            else
+                -- Ensure dirt is tilled for planting.
+                turtle.digDown()
+                do_plant = true
+            end
+            if do_plant then
+                -- Select block and place it.
+                for i = 1, 17 do
+                    if i > 16 then
+                        workError("farm: out of " .. fmt(seed_item_id))
+                        return
+                    end
+                    local detail = getItemDetail(i)
+                    if detail ~= nil and detail.id == seed_item_id then
+                        local select_ok = turtle.select(i)
+                        if not select_ok then
+                            workError("farm: selecting slot " .. fmt(i) .. " failed")
+                            return
+                        end
+                        local place_ok = place(down)
+                        if not place_ok then
+                            workError("farm: place " .. fmt(down) .. " failed")
+                            return
+                        end
+                    end
+                end
+            end
+            -- Move to next farm position.
+            local err
+            there, err = stepTowardsWaypoint(wp)
+            if err ~= nil then
+                workError("farm: step error: " .. err)
+                return
+            end
+        end
+        -- Update work if still current.
+        -- This is cancellation and work update safe.
+        table.remove(wp_stack)
+    end
     saveCurWork()
 end
 
@@ -1105,6 +1186,8 @@ function executeWork(work)
         executeWorkMine(work)
     elseif work.type == "construct" then
         executeWorkConstruct(work)
+    elseif work.type == "farm" then
+        executeWorkFarm(work)
     else
         fatalError("unknown work type: " .. fmt(work.type))
     end

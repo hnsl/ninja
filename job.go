@@ -174,7 +174,7 @@ var tplJobFarm = `new_job = {
     type = "farm",
     instructions = {
         waypoint_stack = {%s},
-        items = %s,
+        items = {%s},
         mod_dim = %d,
     },
 },`

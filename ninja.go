@@ -14,6 +14,7 @@ import (
 )
 
 var turtles = map[turtleID]turtle{}
+var turtlesToDebug map[turtleID]bool
 
 var kern_version int
 
@@ -46,6 +47,7 @@ func main() {
 	}
 	state_dir := os.Args[1]
 	loadState(state_dir)
+	loadJSON(state_dir + "/turtles.debug", &turtlesToDebug)
 	if len(os.Args) < 3 {
 		panic("arg 2: expect web root directory")
 	}
@@ -124,14 +126,17 @@ func postReport(w http.ResponseWriter, r *http.Request) {
 		log.Printf("decoding report body failed: %v\n", err)
 		return
 	}
-	fmt.Printf("incoming report: %#v\n", t)
+	debug := turtlesToDebug[t.Label]
+	if debug {
+		fmt.Printf("incoming report: %#v\n", t)
+	}
 	// Update reported turtle data.
 	turtles[t.Label] = t
 	syncNotify("turtles/"+string(t.Label), buf.String())
 	// Prepare response.
 	var rsp bytes.Buffer
 	// Decide new work for turtle.
-	if t.CurWork != nil {
+	if debug && t.CurWork != nil {
 		fmt.Printf("existing work: %#v\n", *t.CurWork)
 	}
 	work_rsp := ""
@@ -143,7 +148,9 @@ func postReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	work_rsp = *work_ptr
-	fmt.Printf("work decision: %s\n\n", work_rsp)
+	if debug {
+		fmt.Printf("work decision: %s\n\n", work_rsp)
+	}
 	rsp.WriteString("{")
 	rsp.WriteString(work_rsp)
 	if t.Version < kern_version && !t.NewKernel {

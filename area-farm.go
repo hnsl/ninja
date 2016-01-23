@@ -30,12 +30,8 @@ type farmPlot struct {
 	WorkID    workID // `json:"work_id"`
 }
 
-func (_ farmArea) getPlotArea() int {
-	return 9*9 - 1
-}
-
 func (f farmArea) getBoxCoord(box_id int) vec3 {
-	return vec3Add(f.Pos, vec3{-4, 2, 9})
+	return vec3Add(f.Pos, vec3{-4 + box_id, 2, 9})
 }
 
 func (_ farmArea) getBoxLoadDir(box_id int) vec3 {
@@ -63,7 +59,7 @@ func (f farmArea) getAscendOrigin() vec3 {
 func (f farmArea) getQ() qCoords {
 	return qCoords{
 		face_dir:  vec3{-1, 0, 0},
-		origin:    vec3Add(f.Pos, vec3{-2, 2, 6}),
+		origin:    vec3Add(f.Pos, vec3{-1, 2, 6}),
 		q_dir:     vec3{0, 0, -1},
 		o_q0_dir:  vec3{1, 0, 0},
 		q0_t0_dir: vec3{0, 0, 1},
@@ -72,6 +68,7 @@ func (f farmArea) getQ() qCoords {
 
 func (f farmArea) getElevatorJob(t turtle, dst_level int) *string {
 	cur_level := -(t.CurPos[1] - f.Pos[1] - 2) / 3
+	fmt.Printf("cur level: %d, dst_level: %d\n", cur_level, dst_level)
 	if cur_level < 0 {
 		cur_level = 0
 	}
@@ -86,8 +83,8 @@ func (f farmArea) getElevatorJob(t turtle, dst_level int) *string {
 		elevator = f.getDecendOrigin()
 	}
 	waypoints := []vec3{
-		vec3{elevator[0], elevator[cur_level*3], elevator[2]},
-		vec3{elevator[0], elevator[dst_level*3], elevator[2]},
+		vec3{elevator[0], elevator[1] - cur_level * 3, elevator[2]},
+		vec3{elevator[0], elevator[1] - dst_level * 3, elevator[2]},
 	}
 	job := makeJobGo(workIDTmp, waypoints)
 	return &job
@@ -95,7 +92,7 @@ func (f farmArea) getElevatorJob(t turtle, dst_level int) *string {
 
 func (f farmArea) getWaitJob(t turtle) *string {
 	queue := f.getQ()
-	if !vec3Equal(t.CurPos, queue.origin) {
+	if vec3Equal(t.CurPos, queue.origin) {
 		idle_job := makeJobIdle(workIDTmp, 10)
 		return &idle_job
 	}
@@ -268,12 +265,14 @@ func mgrDecideFarmWork(t turtle, f *farmArea) (*string, error) {
 
 func makeFarmOrderJob(t turtle, f farmArea, plot farmPlot) (*string, error) {
 	// Ensure turtle has sufficient seed.
-	required_amount := (f.getPlotArea() + len(plot.Seeds) - 1) / len(plot.Seeds)
+	plot_edge := 9
+	plot_area := plot_edge * plot_edge - 1
+	required_amount := (plot_edge + plot_area + len(plot.Seeds) - 1) / len(plot.Seeds)
 	for _, plot_seed := range plot.Seeds {
 		has_amount := t.InvCount.Grouped[plot_seed]
 		load_amount := required_amount - has_amount
-		if load_amount > 0 {
-			break
+		if load_amount <= 0 {
+			continue
 		}
 		for i, box_seed := range f.Seeds {
 			if box_seed != plot_seed {
@@ -283,7 +282,7 @@ func makeFarmOrderJob(t turtle, f farmArea, plot farmPlot) (*string, error) {
 			load_dir := f.getBoxLoadDir(box_id)
 			load_pos := f.getBoxLoadCoord(box_id)
 			if vec3Equal(t.CurPos, load_pos) {
-				// Create drop job.
+				// Create suck job.
 				job := makeJobSuck(workIDTmp, &box_seed, load_amount, load_dir)
 				return &job, nil
 			} else {
@@ -300,7 +299,8 @@ func makeFarmOrderJob(t turtle, f farmArea, plot farmPlot) (*string, error) {
 		return elevator_job, nil
 	}
 	// Go to farming start position.
-	start_pos := vec3Add(f.Pos, vec3{-4, 2, 4})
+	y_offset := 2 - (3 * plot.Level)
+	start_pos := vec3Add(f.Pos, vec3{-4, y_offset, 4})
 	if !vec3Equal(t.CurPos, start_pos) {
 		job := makeJobGo(workIDTmp, []vec3{start_pos})
 		return &job, nil
@@ -319,7 +319,8 @@ func makeFarmOrderJob(t turtle, f farmArea, plot farmPlot) (*string, error) {
 		// Middle row (corner case).
 		vec3{0, 0, 4},
 		vec3{0, 0, 1},
-		vec3{1, 0, 0},
+		vec3{1, 0, 1},
+		vec3{1, 0, -1},
 		vec3{0, 0, -1},
 		vec3{0, 0, -4},
 		// Bottom rows.
@@ -334,7 +335,7 @@ func makeFarmOrderJob(t turtle, f farmArea, plot farmPlot) (*string, error) {
 	}
 	// Adjust waypoints level and generate absolute coordinates.
 	for i, wp := range waypoints {
-		wp[1] = 2 - (3 * plot.Level)
+		wp[1] = y_offset
 		waypoints[i] = vec3Add(f.Pos, wp)
 	}
 	job := makeJobFarm(plot.WorkID, waypoints, plot.Seeds, 1)

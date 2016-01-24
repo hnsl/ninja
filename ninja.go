@@ -47,7 +47,7 @@ func main() {
 	}
 	state_dir := os.Args[1]
 	loadState(state_dir)
-	loadJSON(state_dir + "/turtles.debug", &turtlesToDebug)
+	loadJSON(state_dir+"/turtles.debug", &turtlesToDebug)
 	if len(os.Args) < 3 {
 		panic("arg 2: expect web root directory")
 	}

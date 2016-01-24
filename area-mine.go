@@ -122,6 +122,26 @@ func (m mineArea) getMineCoord(mine_id int) vec3 {
 	})
 }
 
+func (m mineArea) getQ() qCoords {
+	return qCoords{
+		face_dir:  vec3{0, 0, 1},
+		origin:    vec3Add(m.Pos, vec3{0, 0, -4}),
+		q_dir:     vec3{0, 0, 1},
+		o_q0_dir:  vec3{0, 0, -1},
+		q0_t0_dir: vec3{1, 0, 0},
+	}
+}
+
+func (m mineArea) getWaitJob(t turtle) *string {
+	queue := m.getQ()
+	if vec3Equal(t.CurPos, queue.origin) {
+		idle_job := makeJobIdle(workIDTmp, 20)
+		return &idle_job
+	}
+	queue_job := makeQueueOrderJob(workIDTmp, queue)
+	return &queue_job
+}
+
 type boxLoadOrient struct {
 	coord vec3
 	dir   vec3
@@ -184,12 +204,6 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 		return &job
 	}
 	pending_area_changes := false
-
-	if !m.Enabled {
-		// TODO: Also use queue to move turtles to center of mine.
-		idle_job := makeJobIdle(workIDTmp, 20)
-		return &idle_job
-	}
 
 	// Have we completed a mining operation that we should account for?
 	if order := m.MineAllocs[t.Label]; order != nil {
@@ -315,6 +329,14 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 		}
 	}
 
+	// Handler for idling.
+	tryIdle := func() *string {
+		if m.Enabled {
+			return nil
+		}
+		return m.getWaitJob(t)
+	}
+
 	// Handler for clearing.
 	tryClear := func() *string {
 		ideal_clear_ahead := int(32) // How far NextClear should be kept from NextMine.
@@ -382,7 +404,7 @@ func mgrDecideMineWork(t turtle, m *mineArea) *string {
 	}
 
 	var job *string
-	for _, fn := range []func() *string{tryRefuel, tryUnload, tryClear, tryDrill} {
+	for _, fn := range []func() *string{tryRefuel, tryUnload, tryIdle, tryClear, tryDrill} {
 		job = fn()
 		if job != nil {
 			break

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"time"
 )
@@ -83,8 +82,8 @@ func (f farmArea) getElevatorJob(t turtle, dst_level int) *string {
 		elevator = f.getDecendOrigin()
 	}
 	waypoints := []vec3{
-		vec3{elevator[0], elevator[1] - cur_level * 3, elevator[2]},
-		vec3{elevator[0], elevator[1] - dst_level * 3, elevator[2]},
+		vec3{elevator[0], elevator[1] - cur_level*3, elevator[2]},
+		vec3{elevator[0], elevator[1] - dst_level*3, elevator[2]},
 	}
 	job := makeJobGo(workIDTmp, waypoints)
 	return &job
@@ -176,46 +175,67 @@ func mgrDecideFarmWork(t turtle, f *farmArea) (*string, error) {
 		}
 	}
 
-	// Handler for unloading.
-	tryUnload := func() (*string, error) {
-		if len(t.InvCount.Grouped) == 0 {
-			return nil, nil
-		}
-		// Go to level 0 first.
-		elevator_job := f.getElevatorJob(t, 0)
-		if elevator_job != nil {
-			return elevator_job, nil
-		}
-		// Unload crop seeds first.
-		for i, seed := range f.Seeds {
-			amount := t.InvCount.Grouped[seed]
-			if amount > 0 {
-				box_id := 2 + i
-				load_dir := f.getBoxLoadDir(box_id)
-				load_pos := f.getBoxLoadCoord(box_id)
-				if vec3Equal(t.CurPos, load_pos) {
-					// Create drop job.
-					job := makeJobDrop(workIDTmp, map[itemID]int{seed: amount}, load_dir)
-					return &job, nil
-				} else {
-					// Create go job.
-					job := makeJobGo(workIDTmp, []vec3{load_pos})
-					return &job, nil
+	// Handler for loading and unloading.
+	tryReload := func() (*string, error) {
+		// Calculate required seed amounts.
+		seed_req_amounts := map[itemID]int{}
+		plot_edge := 9
+		plot_area := plot_edge*plot_edge - 1
+		for _, plot := range f.Plots {
+			for _, plot_seed := range plot.Seeds {
+				required_amount := (plot_edge + plot_area + len(plot.Seeds) - 1) / len(plot.Seeds)
+				if seed_req_amounts[plot_seed] < required_amount {
+					seed_req_amounts[plot_seed] = required_amount
 				}
 			}
 		}
-		// Unload general items.
-		load_dir := f.getBoxLoadDir(0)
-		load_pos := f.getBoxLoadCoord(0)
-		if vec3Equal(t.CurPos, load_pos) {
-			// Create drop job.
-			job := makeJobDrop(workIDTmp, t.InvCount.Grouped, load_dir)
-			return &job, nil
-		} else {
-			// Create go job.
-			job := makeJobGo(workIDTmp, []vec3{load_pos})
-			return &job, nil
+		// Determine item balance.
+		balance := map[itemID]int{}
+		for item_id, req_amount := range seed_req_amounts {
+			balance[item_id] = -req_amount
 		}
+		for item_id, has_amount := range t.InvCount.Grouped {
+			balance[item_id] = balance[item_id] + has_amount
+			if balance[item_id] == 0 {
+				delete(balance, item_id)
+			}
+		}
+		for item_id, balance := range balance {
+			// Go to level 0 first.
+			elevator_job := f.getElevatorJob(t, 0)
+			if elevator_job != nil {
+				return elevator_job, nil
+			}
+			// Determine box ID.
+			box_id := 0
+			if balance < 0 {
+				for i, box_seed := range f.Seeds {
+					if box_seed != item_id {
+						continue
+					}
+					box_id = 2 + i
+				}
+			}
+			load_dir := f.getBoxLoadDir(box_id)
+			load_pos := f.getBoxLoadCoord(box_id)
+			if vec3Equal(t.CurPos, load_pos) {
+				if balance > 0 {
+					// Create drop job.
+					job := makeJobDrop(workIDTmp, map[itemID]int{item_id: balance}, load_dir)
+					return &job, nil
+				} else {
+					// Create suck job.
+					job := makeJobSuck(workIDTmp, &item_id, -balance, load_dir)
+					return &job, nil
+				}
+			} else {
+				// Create go job.
+				job := makeJobGo(workIDTmp, []vec3{load_pos})
+				return &job, nil
+			}
+		}
+		// Done if everything is balanced.
+		return nil, nil
 	}
 
 	// Handler for farming.
@@ -239,7 +259,7 @@ func mgrDecideFarmWork(t turtle, f *farmArea) (*string, error) {
 	}
 
 	var job *string
-	for _, fn := range []func() (*string, error){tryRefuel, tryUnload, tryFarm} {
+	for _, fn := range []func() (*string, error){tryRefuel, tryReload, tryFarm} {
 		var err error
 		job, err = fn()
 		if err != nil {
@@ -264,35 +284,6 @@ func mgrDecideFarmWork(t turtle, f *farmArea) (*string, error) {
 }
 
 func makeFarmOrderJob(t turtle, f farmArea, plot farmPlot) (*string, error) {
-	// Ensure turtle has sufficient seed.
-	plot_edge := 9
-	plot_area := plot_edge * plot_edge - 1
-	required_amount := (plot_edge + plot_area + len(plot.Seeds) - 1) / len(plot.Seeds)
-	for _, plot_seed := range plot.Seeds {
-		has_amount := t.InvCount.Grouped[plot_seed]
-		load_amount := required_amount - has_amount
-		if load_amount <= 0 {
-			continue
-		}
-		for i, box_seed := range f.Seeds {
-			if box_seed != plot_seed {
-				continue
-			}
-			box_id := 2 + i
-			load_dir := f.getBoxLoadDir(box_id)
-			load_pos := f.getBoxLoadCoord(box_id)
-			if vec3Equal(t.CurPos, load_pos) {
-				// Create suck job.
-				job := makeJobSuck(workIDTmp, &box_seed, load_amount, load_dir)
-				return &job, nil
-			} else {
-				// Create go job.
-				job := makeJobGo(workIDTmp, []vec3{load_pos})
-				return &job, nil
-			}
-			return nil, errors.New(fmt.Sprintf("failed to find box with seed %v", plot_seed))
-		}
-	}
 	// Go to plot level.
 	elevator_job := f.getElevatorJob(t, plot.Level)
 	if elevator_job != nil {
